@@ -64,11 +64,34 @@ Everyone can change their own password (**Account** button, 10+ characters). Cha
 
 Every login and every action is written to the audit log (who, what, which server, success or failure).
 
-## Deploying publicly (Oracle Cloud / any Ubuntu VPS)
+## Deploying publicly (Oracle Cloud / any VPS)
 
-The setup is: Console listens on loopback, **Caddy** faces the internet and handles HTTPS. Don't expose port 3000 directly: logins would cross the internet in cleartext.
+One command installs everything (Node, the service, config, firewall) or updates an existing install. It works on Oracle Linux / RHEL-family and Debian / Ubuntu, needs root and systemd, and is safe to run again:
 
-You need a domain (or subdomain) with an A record pointing at the server's public IP.
+```bash
+curl -fsSL https://raw.githubusercontent.com/molive6316github/console/main/install.sh | sudo bash
+```
+
+From a terminal it asks whether you have a domain. At the end it prints where to open Console and the admin password (shown once).
+
+**With a domain (HTTPS):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/molive6316github/console/main/install.sh \
+  | sudo env CF_API_TOKEN=xxxx bash -s -- --domain console.example.com
+```
+
+It installs Caddy (the HTTPS certificate is automatic), puts Console behind it on loopback, turns on secure cookies, opens ports 80 and 443, and, **if the domain is on Cloudflare and you give it a token, creates the DNS record itself** (`scripts/cf-dns.mjs`, DNS-only record pointing at the server's IP). Without a token it prints the exact record to add by hand, and Caddy picks it up when it appears. Make the token at https://dash.cloudflare.com/profile/api-tokens with the "Edit zone DNS" template, limited to your zone. It is used once and never stored or printed.
+
+**Without a domain:** plain HTTP at `http://<server-ip>:3000`. Fine to start with if you limit the firewall rule to your own IP. Run the command again with `--domain` whenever you get one.
+
+Running it again updates Console and keeps your settings (it remembers the domain, never resets your accounts, and never touches `servers.json`). Flags: `--domain`, `--ip-only`, `--port`, `--branch`, `--dir`, `--yes`. `--help` lists them. `CONSOLE_ADMIN_PASSWORD=... ` picks the first admin password instead of a generated one.
+
+**The one thing it can't do for you: the cloud provider's own firewall.** The installer opens the firewall on the machine itself, but on Oracle Cloud you must also add an ingress rule in the web console (Networking > your VCN > Security Lists > Add Ingress Rules, TCP, ports 80 and 443 for a domain or 3000 without one). With no domain, set the source to your own IP `/32`.
+
+### Doing it by hand
+
+This is what the installer automates. Console listens on loopback, **Caddy** faces the internet and handles HTTPS. Don't expose port 3000 directly: logins would cross the internet in cleartext. You need a domain (or subdomain) with an A record pointing at the server's public IP.
 
 ```bash
 # 1. user + code
@@ -100,8 +123,8 @@ Notes:
 - Game servers started by the `tmux` driver run as the `console` user. Restarting the dashboard does not kill them (`KillMode=process`). Attach with `sudo -u console tmux attach -t uhc`.
 - For the `docker` driver, add the user to the docker group: `sudo usermod -aG docker console`. Know that this is root-equivalent on that machine.
 - Console controls real processes, so treat the admin password like an SSH key. Use a long one.
-- **Updating:** sign in as admin, click **Updates**, then **Update now**. It fast-forwards from GitHub, runs `npm install` and `npm run build`, and restarts itself (the page reloads when it's back). If the install or build fails it rolls back to the previous version. It refuses to run if tracked files have local edits. This relies on `Restart=on-failure` in the systemd unit: after an update the process exits with code 75 and systemd starts it again.
-- The `console` user must be able to `git fetch` from the repo. If the Updates panel says it can't reach the repo (private repo, no credentials), give that user a read-only deploy key or token, or make the repo public. Test with `sudo -u console git -C /opt/console fetch origin main`.
+- **Updating:** run the install command again, or sign in as admin, click **Updates**, then **Update now**. It fast-forwards from GitHub, runs `npm install` and `npm run build`, and restarts itself (the page reloads when it's back). If the install or build fails it rolls back to the previous version. It refuses to run if tracked files have local edits. This relies on `Restart=on-failure` in the systemd unit: after an update the process exits with code 75 and systemd starts it again.
+- The `console` user must be able to `git fetch` from the repo. With the public repo that just works. If the Updates panel ever says it can't reach the repo, test with `sudo -u console git -C /opt/console fetch origin main`.
 - Manual update, if you ever need it: `cd /opt/console && sudo -u console git pull --ff-only && sudo -u console npm install && sudo -u console npm run build && sudo systemctl restart console`.
 
 ## Security notes
