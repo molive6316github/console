@@ -1,0 +1,43 @@
+[
+  {
+    "id": "demo-web",
+    "name": "Demo Web (fake)",
+    "type": "dummy",
+    "target": { "startsUp": true }
+  },
+  {
+    "id": "demo-db",
+    "name": "Demo DB (fake)",
+    "type": "dummy",
+    "target": { "startsUp": false }
+  },
+  {
+    "id": "my-site",
+    "name": "My Site (HTTP check, read-only)",
+    "type": "http",
+    "target": { "url": "https://example.com", "expectStatus": 200 }
+  },
+  {
+    "id": "redis",
+    "name": "Redis (Docker)",
+    "type": "docker",
+    "target": { "container": "redis" }
+  },
+  {
+    "id": "oracle-nginx",
+    "name": "Oracle box nginx (systemd over SSH)",
+    "type": "systemd",
+    "target": { "host": "ubuntu@203.0.113.10", "unit": "nginx.service", "sudo": true }
+  },
+  {
+    "id": "uhc",
+    "name": "UHC server (tmux)",
+    "type": "tmux",
+    "target": {
+      "session": "uhc",
+      "cwd": "/srv/uhc",
+      "startCommand": "java -Xmx4G -jar server.jar nogui",
+      "stopCommand": "stop"
+    }
+  }
+]
