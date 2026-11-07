@@ -1,0 +1,6 @@
+# Replace with your real domain. Its DNS A record must point at the Oracle box's public IP.
+# Caddy gets and renews the HTTPS certificate by itself.
+console.example.com {
+	encode gzip
+	reverse_proxy 127.0.0.1:3000
+}

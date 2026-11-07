@@ -1,0 +1,21 @@
+[Unit]
+Description=Console server dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=console
+WorkingDirectory=/opt/console
+EnvironmentFile=/etc/console.env
+# Change the path if node lives elsewhere (check: which node)
+ExecStart=/usr/bin/node server/src/index.js
+Restart=on-failure
+RestartSec=3
+
+# Restarting the dashboard must NOT kill the game servers it started in tmux.
+KillMode=process
+
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

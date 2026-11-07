@@ -35,6 +35,15 @@ if (admin) {
   console.log(admin.generated ? `  password: ${admin.password}   (shown once, save it)\n` : "  password: from CONSOLE_ADMIN_PASSWORD\n");
 }
 
+const loopback = ["127.0.0.1", "::1", "localhost"].includes(HOST);
+if (!loopback && process.env.CONSOLE_SECURE_COOKIES !== "1") {
+  console.warn(
+    "WARNING: listening on a public address without HTTPS. Passwords and session cookies will\n" +
+      "travel in cleartext. Put the Caddy reverse proxy in front (see deploy/), keep HOST=127.0.0.1,\n" +
+      "and set CONSOLE_SECURE_COOKIES=1 and CONSOLE_TRUST_PROXY=1.\n"
+  );
+}
+
 const app = buildApp({
   db,
   secureCookies: process.env.CONSOLE_SECURE_COOKIES === "1",

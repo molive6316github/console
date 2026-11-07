@@ -90,6 +90,21 @@ test("POST without JSON content type is blocked", async () => {
   assert.equal(res.statusCode, 415);
 });
 
+test("security headers are set, HSTS only when cookies are secure", async () => {
+  const { app } = setup();
+  const res = await app.inject({ url: "/api/me" });
+  assert.equal(res.headers["x-frame-options"], "DENY");
+  assert.equal(res.headers["x-content-type-options"], "nosniff");
+  assert.match(res.headers["content-security-policy"], /default-src 'self'/);
+  assert.equal(res.headers["cache-control"], "no-store");
+  assert.equal(res.headers["strict-transport-security"], undefined);
+
+  const db = openDb(":memory:");
+  const secure = buildApp({ db, secureCookies: true });
+  const res2 = await secure.inject({ url: "/api/me" });
+  assert.match(res2.headers["strict-transport-security"], /max-age=/);
+});
+
 test("unknown action is rejected", async () => {
   const { app } = setup();
   const { cookie } = await login(app, "op", "pw-op");

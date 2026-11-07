@@ -36,6 +36,19 @@ export function buildApp({ db, secureCookies = false, logger = false }) {
 
   const busy = new Set(); // server ids with an action in flight
 
+  // ---- security headers ----------------------------------------------------
+  app.addHook("onSend", async (req, reply) => {
+    reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("X-Frame-Options", "DENY");
+    reply.header("Referrer-Policy", "no-referrer");
+    reply.header(
+      "Content-Security-Policy",
+      "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+    );
+    if (secureCookies) reply.header("Strict-Transport-Security", "max-age=31536000");
+    if (req.url.startsWith("/api/")) reply.header("Cache-Control", "no-store");
+  });
+
   // ---- auth plumbing -------------------------------------------------------
   app.decorateRequest("user", null);
   app.addHook("onRequest", async (req) => {
