@@ -45,6 +45,12 @@ export function userFromToken(db, token) {
   return { id: row.id, username: row.username, role: row.role };
 }
 
+// Sets a new password and signs out every session of that user except keepToken (the one making the change).
+export function changePassword(db, userId, newPassword, keepToken) {
+  db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(hashPassword(newPassword), userId);
+  db.prepare("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?").run(userId, sha(keepToken ?? ""));
+}
+
 export function destroySession(db, token) {
   if (token) db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(sha(token));
 }

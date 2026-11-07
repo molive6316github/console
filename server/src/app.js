@@ -4,7 +4,9 @@ import fastifyStatic from "@fastify/static";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
 import { getDriver } from "./drivers/index.js";
+import { updater as defaultUpdater } from "./updater.js";
 import { getServer, listServers, audit } from "./db.js";
 import {
   verifyPassword,
@@ -15,10 +17,12 @@ import {
   loginThrottled,
   recordLoginFailure,
   clearLoginFailures,
+  changePassword,
 } from "./auth.js";
 
 const COOKIE = "console_session";
 const DUMMY_HASH = "00:" + "00".repeat(64);
+const MIN_PASSWORD = 10;
 const ACTIONS = ["start", "stop", "restart"];
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -30,7 +34,19 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(t));
 }
 
-export function buildApp({ db, secureCookies = false, logger = false }) {
+export function buildApp({
+  db,
+  secureCookies = false,
+  logger = false,
+  version = "dev",
+  updater = defaultUpdater,
+  // After an update the process exits with a non-zero code so systemd (Restart=on-failure) brings it back.
+  // Outside systemd there is nothing to bring it back, so we only exit when INVOCATION_ID is set.
+  canRestart = () => Boolean(process.env.INVOCATION_ID),
+  onRestart = () => process.exit(75),
+  restartDelayMs = 800,
+}) {
+  const bootId = randomUUID(); // changes every start; the UI uses it to know the restart finished
   const app = Fastify({ logger, trustProxy: Boolean(process.env.CONSOLE_TRUST_PROXY) });
   app.register(cookie);
 
@@ -107,7 +123,55 @@ export function buildApp({ db, secureCookies = false, logger = false }) {
   app.get("/api/me", { preHandler: need("viewer") }, async (req) => ({
     username: req.user.username,
     role: req.user.role,
+    version,
+    bootId,
   }));
+
+  // Any signed-in user can change their own password.
+  app.post("/api/password", { preHandler: need("viewer") }, async (req, reply) => {
+    const ip = req.ip;
+    if (loginThrottled(ip)) return reply.code(429).send({ error: "Too many attempts, try again later" });
+    const { current, next } = req.body ?? {};
+    if (typeof current !== "string" || typeof next !== "string") {
+      return reply.code(400).send({ error: "current and next password required" });
+    }
+    if (next.length < MIN_PASSWORD) {
+      return reply.code(400).send({ error: `New password must be at least ${MIN_PASSWORD} characters` });
+    }
+    if (next.length > 200) return reply.code(400).send({ error: "New password is too long" });
+
+    const row = db.prepare("SELECT password_hash FROM users WHERE id = ?").get(req.user.id);
+    // 403, not 401: the UI treats 401 as "session expired" and would sign you out.
+    if (!row || !verifyPassword(current, row.password_hash)) {
+      recordLoginFailure(ip);
+      audit(db, { username: req.user.username, action: "password_change", ok: false, detail: "wrong current password" });
+      return reply.code(403).send({ error: "Current password is wrong" });
+    }
+    if (next === current) return reply.code(400).send({ error: "New password must be different" });
+
+    changePassword(db, req.user.id, next, req.cookies?.[COOKIE]);
+    audit(db, { username: req.user.username, action: "password_change", ok: true });
+    return { ok: true };
+  });
+
+  // ---- self-update (admin only) -------------------------------------------
+  app.get("/api/update", { preHandler: need("admin") }, async (req) =>
+    updater.check({ force: req.query?.force === "1" })
+  );
+
+  app.post("/api/update", { preHandler: need("admin") }, async (req, reply) => {
+    const result = await updater.apply();
+    audit(db, {
+      username: req.user.username,
+      action: "update",
+      ok: result.ok,
+      detail: result.ok ? (result.updated ? `${result.from} -> ${result.to}` : "already up to date") : result.error,
+    });
+    if (!result.ok) return reply.code(500).send(result);
+    const restarting = Boolean(result.updated) && canRestart();
+    if (restarting) setTimeout(onRestart, restartDelayMs); // let this response reach the browser first
+    return { ...result, restarting };
+  });
 
   app.get("/api/servers", { preHandler: need("viewer") }, async (req) => {
     const servers = listServers(db);

@@ -58,7 +58,9 @@ Drop a file in `server/src/drivers/`, export an object with `type`, `status`, `s
 |---|---|
 | `viewer` | see status |
 | `operator` | + start / stop / restart |
-| `admin` | + read the audit log |
+| `admin` | + read the audit log, update Console |
+
+Everyone can change their own password (**Account** button, 10+ characters). Changing it signs out that user's other sessions. Forgot the admin password? Stop the service, delete `data/console.db*`, set `CONSOLE_ADMIN_PASSWORD`, start it again. That wipes users and the audit log.
 
 Every login and every action is written to the audit log (who, what, which server, success or failure).
 
@@ -98,7 +100,9 @@ Notes:
 - Game servers started by the `tmux` driver run as the `console` user. Restarting the dashboard does not kill them (`KillMode=process`). Attach with `sudo -u console tmux attach -t uhc`.
 - For the `docker` driver, add the user to the docker group: `sudo usermod -aG docker console`. Know that this is root-equivalent on that machine.
 - Console controls real processes, so treat the admin password like an SSH key. Use a long one.
-- Update later with `cd /opt/console && sudo -u console git pull && sudo -u console npm install && sudo -u console npm run build && sudo systemctl restart console`.
+- **Updating:** sign in as admin, click **Updates**, then **Update now**. It fast-forwards from GitHub, runs `npm install` and `npm run build`, and restarts itself (the page reloads when it's back). If the install or build fails it rolls back to the previous version. It refuses to run if tracked files have local edits. This relies on `Restart=on-failure` in the systemd unit: after an update the process exits with code 75 and systemd starts it again.
+- The `console` user must be able to `git fetch` from the repo. If the Updates panel says it can't reach the repo (private repo, no credentials), give that user a read-only deploy key or token, or make the repo public. Test with `sudo -u console git -C /opt/console fetch origin main`.
+- Manual update, if you ever need it: `cd /opt/console && sudo -u console git pull --ff-only && sudo -u console npm install && sudo -u console npm run build && sudo systemctl restart console`.
 
 ## Security notes
 
@@ -122,6 +126,7 @@ Notes:
 | `CONSOLE_SECURE_COOKIES` | off |
 | `CONSOLE_TRUST_PROXY` | off |
 | `CONSOLE_LOG` | off (`1` for request logs) |
+| `CONSOLE_UPDATE_BRANCH` | `main` |
 
 ## Roadmap
 

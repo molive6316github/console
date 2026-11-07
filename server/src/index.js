@@ -1,9 +1,10 @@
 import path from "node:path";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { openDb, syncServers } from "./db.js";
 import { ensureAdmin } from "./auth.js";
 import { buildApp } from "./app.js";
+import { updater } from "./updater.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
@@ -44,8 +45,13 @@ if (!loopback && process.env.CONSOLE_SECURE_COOKIES !== "1") {
   );
 }
 
+const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
+const sha = await updater.current();
+const version = sha ? `${pkg.version} (${sha})` : pkg.version;
+
 const app = buildApp({
   db,
+  version,
   secureCookies: process.env.CONSOLE_SECURE_COOKIES === "1",
   logger: process.env.CONSOLE_LOG === "1",
 });

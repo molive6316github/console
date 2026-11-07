@@ -9,6 +9,7 @@ WorkingDirectory=/opt/console
 EnvironmentFile=/etc/console.env
 # Change the path if node lives elsewhere (check: which node)
 ExecStart=/usr/bin/node server/src/index.js
+# on-failure matters: the in-dashboard updater restarts Console by exiting with code 75.
 Restart=on-failure
 RestartSec=3
 

@@ -105,6 +105,36 @@ test("security headers are set, HSTS only when cookies are secure", async () => 
   assert.match(res2.headers["strict-transport-security"], /max-age=/);
 });
 
+test("password change: wrong current password is 403 and does not sign you out", async () => {
+  const { app } = setup();
+  const { cookie } = await login(app, "op", "pw-op");
+  const res = await app.inject({ method: "POST", url: "/api/password", headers: { cookie }, payload: { current: "nope", next: "a-brand-new-pass" } });
+  assert.equal(res.statusCode, 403);
+  assert.equal((await app.inject({ url: "/api/me", headers: { cookie } })).statusCode, 200);
+});
+
+test("password change: works, old password dies, other sessions are signed out", async () => {
+  const { app } = setup();
+  const a = await login(app, "op", "pw-op");
+  const b = await login(app, "op", "pw-op");
+  const res = await app.inject({ method: "POST", url: "/api/password", headers: { cookie: a.cookie }, payload: { current: "pw-op", next: "a-brand-new-pass" } });
+  assert.equal(res.statusCode, 200);
+  assert.equal((await app.inject({ url: "/api/me", headers: { cookie: a.cookie } })).statusCode, 200);
+  assert.equal((await app.inject({ url: "/api/me", headers: { cookie: b.cookie } })).statusCode, 401);
+  assert.equal((await login(app, "op", "pw-op")).res.statusCode, 401);
+  assert.equal((await login(app, "op", "a-brand-new-pass")).res.statusCode, 200);
+});
+
+test("password change: rejects short and unchanged passwords, needs login", async () => {
+  const { app } = setup();
+  const { cookie } = await login(app, "op", "pw-op");
+  const post = (payload) => app.inject({ method: "POST", url: "/api/password", headers: { cookie }, payload });
+  assert.equal((await post({ current: "pw-op", next: "short" })).statusCode, 400);
+  assert.equal((await post({ current: "pw-op", next: "pw-op" })).statusCode, 400);
+  const anon = await app.inject({ method: "POST", url: "/api/password", payload: { current: "x", next: "long-enough-pw" } });
+  assert.equal(anon.statusCode, 401);
+});
+
 test("unknown action is rejected", async () => {
   const { app } = setup();
   const { cookie } = await login(app, "op", "pw-op");
