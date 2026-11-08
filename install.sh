@@ -18,6 +18,8 @@
 #   --user NAME     Linux user Console runs as (default: the user who ran sudo, e.g. opc; else a new 'console' user)
 #   --minecraft     set this machine up as a Minecraft host (simpler menu, Minecraft first). --standard turns it off.
 #   --reconfigure   run the setup wizard again on an existing install (mode, address, port)
+#   --docker [NAME] create (or update) an isolated Console in a Docker container instead. Runs side by side with
+#                   the main install: its own data, port and servers. --docker-remove NAME [--purge] removes one.
 #   --yes           never ask questions (use the environment variables below to set things)
 # Environment
 #   CF_API_TOKEN              Cloudflare token (Zone:Read + DNS:Edit). Used once, never stored or printed.
@@ -45,6 +47,18 @@ IP_ONLY=0
 MODE_FLAG="${CONSOLE_MODE_FLAG:-}"
 ASSUME_YES=0
 RECONFIGURE=0
+DOCKER_MODE=0
+DOCKER_NAME=""
+DOCKER_REMOVE=""
+DOCKER_PURGE=0
+DOCKER_SRC="${CONSOLE_DOCKER_SRC:-/opt/console-docker/src}"
+DOCKER_ENV_DIR="${CONSOLE_DOCKER_ENV_DIR:-/etc/console-docker}"
+DOCKER_IMAGE="console:local"
+D_PORT=""
+D_PORTS=""
+D_PUBLIC=1
+D_MEM=""
+D_CPUS=""
 WIZ_ADMIN_USER=
 WIZ_GH_TOKEN=
 WIZ_GH_ORG=
@@ -92,6 +106,8 @@ Console installer. Run as root; safe to repeat.
   --user NAME     Linux user Console runs as (default: you, the user who ran sudo)
   --minecraft     set this machine up as a Minecraft host (--standard turns that off)
   --reconfigure   run the setup wizard again on an existing install
+  --docker [NAME] an isolated Console in Docker (own data, own port; side by side with the main one)
+  --docker-remove NAME [--purge]   remove a Docker instance (--purge also deletes its data)
   --yes           never ask questions
 EOF
 }
@@ -209,6 +225,10 @@ parse_args() {
       --minecraft) MODE_FLAG=minecraft; shift ;;
       --standard) MODE_FLAG=standard; shift ;;
       --reconfigure) RECONFIGURE=1; shift ;;
+      --docker)   DOCKER_MODE=1; shift
+                  if [ $# -gt 0 ] && [[ $1 != -* ]]; then DOCKER_NAME="$1"; shift; fi ;;
+      --docker-remove) [ $# -ge 2 ] || die "--docker-remove needs a name"; DOCKER_REMOVE="$2"; shift 2 ;;
+      --purge)    DOCKER_PURGE=1; shift ;;
       --yes|-y)   ASSUME_YES=1; shift ;;
       -h|--help)  usage; exit 0 ;;
       *)          die "Unknown option: $1 (try --help)" ;;
@@ -223,6 +243,8 @@ parse_args() {
   fi
   [[ $BRANCH =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || die "Bad branch name: $BRANCH"
   [ -z "$USER_FLAG" ] || valid_username "$USER_FLAG" || die "Bad user name: $USER_FLAG"
+  [ -z "$DOCKER_NAME" ] || valid_instance "$DOCKER_NAME" || die "Docker instance names use a-z, 0-9, - and _ (max 31): $DOCKER_NAME"
+  [ -z "$DOCKER_REMOVE" ] || valid_instance "$DOCKER_REMOVE" || die "Docker instance names use a-z, 0-9, - and _ (max 31): $DOCKER_REMOVE"
   [[ $DIR =~ ^/[A-Za-z0-9._/-]+$ ]] || die "--dir must be an absolute path with simple characters: $DIR"
 }
 
@@ -730,6 +752,290 @@ setup_domain() {
   else warn "HTTPS isn't answering yet. Usually that means DNS hasn't spread, or ports 80/443 aren't open in your cloud firewall. Watch it: journalctl -u caddy -f"; fi
 }
 
+
+# ---- Docker instances: an isolated Console that runs side by side with the main one ----------------
+# Handy for things you share, separate projects, testing, or keeping configs apart. Each instance has its own
+# data volume, port, admin account and servers, and cannot see the host's files, services or other instances.
+
+valid_instance() { [[ $1 =~ ^[a-z0-9][a-z0-9_-]{0,30}$ ]]; }
+valid_ports()    { # "none" or comma-separated TCP ports
+  local p; [ "$1" = none ] && return 0
+  [ -n "$1" ] || return 1
+  IFS=, read -ra _ps <<<"$1"
+  for p in "${_ps[@]}"; do [[ $p =~ ^[0-9]+$ ]] && [ "$p" -ge 1 ] && [ "$p" -le 65535 ] || return 1; done
+}
+valid_limit()    { [[ $1 =~ ^[0-9]+(\.[0-9]+)?[mMgG]?$ ]]; } # memory like 2g / 512m, or cpus like 1.5
+d_env_file()  { printf '%s/%s.env' "$DOCKER_ENV_DIR" "$1"; }
+d_denv_get()  { local f; f=$(d_env_file "$1"); [ -f "$f" ] || return 0; grep -E "^$2=" "$f" | tail -n1 | cut -d= -f2- || true; }
+d_denv_set()  { # name key value
+  local f tmp; f=$(d_env_file "$1"); mkdir -p "$DOCKER_ENV_DIR"; chmod 700 "$DOCKER_ENV_DIR"; touch "$f"; chmod 600 "$f"
+  if grep -qE "^$2=" "$f"; then
+    tmp=$(mktemp); K="$2" V="$3" awk 'BEGIN { FS = "=" } $1 == ENVIRON["K"] { print ENVIRON["K"] "=" ENVIRON["V"]; next } { print }' "$f" > "$tmp"; cat "$tmp" > "$f"; rm -f "$tmp"
+  else printf '%s=%s\n' "$2" "$3" >> "$f"; fi
+}
+d_denv_del()  { local f tmp; f=$(d_env_file "$1"); [ -f "$f" ] || return 0; tmp=$(mktemp); grep -v -E "^$2=" "$f" > "$tmp" || true; cat "$tmp" > "$f"; rm -f "$tmp"; }
+
+random_password() { local p; p=$(head -c 96 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 22 || true); printf '%s' "$p"; }
+
+port_free() { # 0 when nothing listens on the TCP port (and no docker container already publishes it)
+  if command -v ss >/dev/null 2>&1 && ss -ltnH "sport = :$1" 2>/dev/null | grep -q .; then return 1; fi
+  if docker ps --format '{{.Ports}}' 2>/dev/null | grep -qE "(:|^)$1->"; then return 1; fi
+  return 0
+}
+next_free_port() { local p=${1:-3100}; while ! port_free "$p" && [ "$p" -lt 65000 ]; do p=$((p + 1)); done; printf '%s' "$p"; }
+
+docker_instances() { docker ps -a --filter label=console.instance --format '{{.Label "console.instance"}}' 2>/dev/null | sort || true; }
+
+ensure_docker() {
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then return 0; fi
+  if command -v docker >/dev/null 2>&1; then
+    systemctl start docker >/dev/null 2>&1 || true
+    docker info >/dev/null 2>&1 && return 0
+    die "Docker is installed but not running. Try: sudo systemctl start docker"
+  fi
+  local go=0
+  if [ "$HAVE_TTY" -eq 1 ]; then yes_no "Docker isn't installed. Install it now (Docker's official script)?" y && go=1
+  elif [ "${CONSOLE_DOCKER_INSTALL:-0}" = 1 ]; then go=1; fi
+  [ "$go" -eq 1 ] || die "Docker isn't installed. Install it (https://docs.docker.com/engine/install/) and run this again."
+  info "Installing Docker (this takes a minute)..."
+  curl -fsSL https://get.docker.com | sh >/dev/null 2>&1 || die "Docker's installer failed. Install Docker by hand and run this again."
+  systemctl enable --now docker >/dev/null 2>&1 || true
+  docker info >/dev/null 2>&1 || die "Docker installed but isn't answering."
+  ok "Installed Docker"
+}
+
+docker_build() {
+  command -v git >/dev/null 2>&1 || { [ -n "$PM" ] || detect_pm; pkg_install git; }
+  mkdir -p "$(dirname "$DOCKER_SRC")"
+  if [ -d "$DOCKER_SRC/.git" ]; then
+    git -C "$DOCKER_SRC" fetch --quiet origin "$BRANCH"
+    git -C "$DOCKER_SRC" checkout --quiet -B "$BRANCH" "origin/$BRANCH"
+    git -C "$DOCKER_SRC" reset --quiet --hard "origin/$BRANCH"
+  else
+    rm -rf "$DOCKER_SRC"
+    git clone --quiet --depth 1 --branch "$BRANCH" "$REPO.git" "$DOCKER_SRC" 2>/dev/null || git clone --quiet --depth 1 --branch "$BRANCH" "$REPO" "$DOCKER_SRC"
+  fi
+  spin "Building the Console image (a few minutes the first time)" docker build -q -f "$DOCKER_SRC/deploy/Dockerfile" -t "$DOCKER_IMAGE" "$DOCKER_SRC"
+}
+
+# Questions for a NEW instance. Existing instances keep their saved settings (re-run with --reconfigure to change them).
+docker_wizard() {
+  local name=$DOCKER_NAME ans
+  WIZ_STEP=0; WIZ_TOTAL=4
+  banner
+  local existing; existing=$(docker_instances | tr '\n' ' ')
+  [ -z "$existing" ] || hint "Existing Docker instances: $existing"
+  step "Name this instance"
+  hint "Lowercase letters, numbers, - and _. Re-use a name to update that instance (its data is kept)."
+  while :; do
+    name=$(ask_default "Name" "${name:-sandbox}")
+    valid_instance "$name" && break
+    warn "Use a-z, 0-9, - and _ only."; name=""
+  done
+  DOCKER_NAME=$name
+  if [ -f "$(d_env_file "$name")" ] && [ "$RECONFIGURE" -eq 0 ]; then
+    ok "Updating the existing instance '$name'. Its data and settings stay as they are."
+    return 0
+  fi
+
+  step "What is it for?"
+  if [ -z "$MODE_FLAG" ]; then
+    echo "      1) Minecraft host   Minecraft tools first"
+    echo "      2) General          any kind of server, bot, site or app"
+    ans=$(ask_default "Pick one" 2)
+    case "$ans" in 1|m|M) MODE_FLAG=minecraft ;; *) MODE_FLAG=standard ;; esac
+  fi
+  D_PORT=$(ask_default "Dashboard port on this machine" "$(next_free_port 3100)")
+  { [[ $D_PORT =~ ^[0-9]+$ ]] && [ "$D_PORT" -ge 1 ] && [ "$D_PORT" -le 65535 ]; } || { warn "Not a valid port. Using $(next_free_port 3100)."; D_PORT=$(next_free_port 3100); }
+  hint "Ports your servers inside it need reachable from outside (comma-separated, or 'none')."
+  D_PORTS=$(ask_default "Extra ports to publish" "$([ "$MODE_FLAG" = minecraft ] && echo 25565 || echo none)")
+  valid_ports "$D_PORTS" || { warn "That isn't a list of ports. Publishing none."; D_PORTS=none; }
+  if yes_no "Reachable from the internet? (No = only from this machine, e.g. through an SSH tunnel)" y; then D_PUBLIC=1; else D_PUBLIC=0; fi
+
+  step "Its own admin account"
+  WIZ_ADMIN_USER=$(ask_default "Username" "admin")
+  valid_username "$WIZ_ADMIN_USER" || [ "$WIZ_ADMIN_USER" = admin ] || { warn "Letters, numbers, - and _ only. Using 'admin'."; WIZ_ADMIN_USER=admin; }
+  if [ -z "$ADMIN_PW_PRESET" ]; then
+    if yes_no "Make up a strong password for me?" y; then ok "I'll generate one and show it once at the end."
+    else
+      local p1 p2
+      while :; do
+        p1=$(ask_secret "    Password (10+ characters; letters, numbers, _ . @ % + , : = -): ")
+        valid_password "$p1" || { warn "Too short, or it has a character I can't pass safely."; continue; }
+        p2=$(ask_secret "    Type it again: ")
+        [ "$p1" = "$p2" ] && break; warn "They didn't match."
+      done
+      ADMIN_PW_PRESET=$p1
+    fi
+  fi
+
+  step "Limits and extras (all optional)"
+  hint "Limits stop a runaway server in here from starving the rest of the machine."
+  D_MEM=$(ask "    Memory limit, like 4g (Enter = none): ")
+  if [ -n "$D_MEM" ] && ! valid_limit "$D_MEM"; then warn "Use a number with m or g, like 512m or 4g. No limit set."; D_MEM=""; fi
+  D_CPUS=$(ask "    CPU limit, like 2 (Enter = none): ")
+  if [ -n "$D_CPUS" ] && ! valid_limit "$D_CPUS"; then warn "Use a number like 1.5. No limit set."; D_CPUS=""; fi
+  local t; t=$(ask_secret "    GitHub token for this instance (Enter to skip): ")
+  if [ -n "$t" ]; then if valid_token "$t"; then WIZ_GH_TOKEN=$t; ok "Token saved ($(mask_tail "$t"))"; else warn "That doesn't look like a GitHub token. Skipping."; fi; fi
+
+  printf '\n%sReady%s\n' "$B" "$N"
+  echo "    Instance:  console-$name  (data in the Docker volume console-$name-data)"
+  echo "    Dashboard: http://${PUBLIC_IP:-<this-machine>}:$D_PORT$([ "$D_PUBLIC" = 0 ] && echo '  (this machine only)')"
+  echo "    Ports:     $D_PORTS"
+  echo "    Limits:    ${D_MEM:-no memory limit}, ${D_CPUS:+$D_CPUS cpu(s)}${D_CPUS:-no cpu limit}"
+  echo
+  yes_no "Go?" y || die "Cancelled. Nothing was changed."
+}
+
+docker_write_env() { # name  (new instances only)
+  local n=$1
+  [ -n "$D_PORT" ] || D_PORT=${CONSOLE_DOCKER_PORT:-$(next_free_port 3100)}
+  [ "${CONSOLE_DOCKER_PUBLIC:-1}" != 0 ] || D_PUBLIC=0
+  [ -n "$D_PORTS" ] || D_PORTS=${CONSOLE_DOCKER_PORTS:-$([ "$MODE_FLAG" = minecraft ] && echo 25565 || echo none)}
+  d_denv_set "$n" HOST 0.0.0.0
+  d_denv_set "$n" PORT 3000
+  d_denv_set "$n" CONSOLE_ADMIN_USER "${WIZ_ADMIN_USER:-admin}"
+  if [ -z "$ADMIN_PW_PRESET" ]; then ADMIN_PW=$(random_password); ADMIN_PW_NOTE=generated
+  else
+    valid_password "$ADMIN_PW_PRESET" || die "CONSOLE_ADMIN_PASSWORD must be 10+ characters from A-Z a-z 0-9 _ . @ % + , : = -"
+    ADMIN_PW=$ADMIN_PW_PRESET; ADMIN_PW_NOTE=preset
+  fi
+  d_denv_set "$n" CONSOLE_ADMIN_PASSWORD "$ADMIN_PW"
+  [ "$MODE_FLAG" != minecraft ] || d_denv_set "$n" CONSOLE_MODE minecraft
+  [ -z "$PUBLIC_IP" ] || d_denv_set "$n" CONSOLE_PUBLIC_IP "$PUBLIC_IP"
+  [ -z "$WIZ_GH_TOKEN" ] || d_denv_set "$n" CONSOLE_GITHUB_TOKEN "$WIZ_GH_TOKEN"
+  [ -z "$WIZ_GH_ORG" ] || d_denv_set "$n" CONSOLE_GITHUB_ORG "$WIZ_GH_ORG"
+  d_denv_set "$n" CONSOLE_D_PORT "$D_PORT"
+  d_denv_set "$n" CONSOLE_D_PORTS "$D_PORTS"
+  d_denv_set "$n" CONSOLE_D_PUBLIC "$D_PUBLIC"
+  d_denv_set "$n" CONSOLE_D_MEM "$D_MEM"
+  d_denv_set "$n" CONSOLE_D_CPUS "$D_CPUS"
+}
+
+# The exact docker run arguments for an instance, one per line (also what the tests check).
+docker_run_args() { # name
+  local n=$1 port ports pub mem cpus bind p
+  port=$(d_denv_get "$n" CONSOLE_D_PORT); ports=$(d_denv_get "$n" CONSOLE_D_PORTS); pub=$(d_denv_get "$n" CONSOLE_D_PUBLIC)
+  mem=$(d_denv_get "$n" CONSOLE_D_MEM); cpus=$(d_denv_get "$n" CONSOLE_D_CPUS)
+  bind=0.0.0.0; [ "$pub" = 0 ] && bind=127.0.0.1
+  printf '%s\n' run -d --init --name "console-$n" --label "console.instance=$n" --restart unless-stopped \
+    --env-file "$(d_env_file "$n")" -v "console-$n-data:/data" -p "$bind:$port:3000" \
+    --cap-drop ALL --security-opt no-new-privileges --pids-limit 2048
+  if [ -n "$ports" ] && [ "$ports" != none ]; then
+    IFS=, read -ra _ps <<<"$ports"
+    for p in "${_ps[@]}"; do printf '%s\n' -p "$bind:$p:$p"; done
+  fi
+  [ -z "$mem" ] || printf '%s\n' --memory "$mem"
+  [ -z "$cpus" ] || printf '%s\n' --cpus "$cpus"
+  printf '%s\n' "$DOCKER_IMAGE"
+}
+
+docker_start_instance() { # name
+  local n=$1 args=()
+  mapfile -t args < <(docker_run_args "$n")
+  docker rm -f "console-$n" >/dev/null 2>&1 || true
+  docker "${args[@]}" >/dev/null
+}
+
+docker_main() {
+  say "Docker instance"
+  ensure_docker
+  if [ "$HAVE_TTY" -eq 1 ]; then docker_wizard
+  else
+    DOCKER_NAME=${DOCKER_NAME:-${CONSOLE_DOCKER_NAME:-sandbox}}
+    valid_instance "$DOCKER_NAME" || die "Docker instance names use a-z, 0-9, - and _ (max 31): $DOCKER_NAME"
+  fi
+  local n=$DOCKER_NAME fresh=0
+  [ -f "$(d_env_file "$n")" ] && [ "$RECONFIGURE" -eq 0 ] || fresh=1
+  docker_build
+  if [ "$fresh" -eq 1 ]; then
+    # Keep the one-time secrets (token, first password) out of this shell's environment from here on.
+    docker_write_env "$n"
+  fi
+  local port; port=$(d_denv_get "$n" CONSOLE_D_PORT)
+  say "Starting console-$n"
+  docker_start_instance "$n"
+  if wait_for "http://127.0.0.1:$port/api/me" 60; then ok "console-$n is up"
+  else docker logs --tail 25 "console-$n" >&2 || true; die "The container didn't start. The last log lines are above."; fi
+  # One-time values are only needed on first start. Remove them, then recreate the container (its data volume stays)
+  # so they don't linger in the container's own environment either.
+  if [ "$fresh" -eq 1 ]; then
+    local k
+    d_denv_del "$n" CONSOLE_ADMIN_PASSWORD
+    for k in CONSOLE_GITHUB_TOKEN CONSOLE_GITHUB_ORG; do d_denv_del "$n" "$k"; done
+    docker_start_instance "$n"
+    wait_for "http://127.0.0.1:$port/api/me" 60 || { docker logs --tail 25 "console-$n" >&2 || true; die "The container didn't come back after the first start."; }
+  fi
+  [ "$(d_denv_get "$n" CONSOLE_D_PUBLIC)" = 0 ] || open_ports "$port" $(d_denv_get "$n" CONSOLE_D_PORTS | tr ',' ' ' | sed 's/none//')
+  docker_summary "$n" "$fresh"
+}
+
+docker_summary() { # name fresh
+  local n=$1 fresh=$2 port ports pub host
+  port=$(d_denv_get "$n" CONSOLE_D_PORT); ports=$(d_denv_get "$n" CONSOLE_D_PORTS); pub=$(d_denv_get "$n" CONSOLE_D_PUBLIC)
+  host=${PUBLIC_IP:-<this-machine>}; [ "$pub" = 0 ] && host=127.0.0.1
+  echo
+  echo "${B}================================================================${N}"
+  echo "${B}  Docker instance '$n' is running${N}"
+  echo
+  echo "  Open it:   http://$host:$port"
+  if [ "$fresh" -eq 1 ]; then
+    echo "  Sign in:   $(d_denv_get "$n" CONSOLE_ADMIN_USER)  /  $([ "$ADMIN_PW_NOTE" = generated ] && echo "$ADMIN_PW" || echo 'the password you set')"
+    [ "$ADMIN_PW_NOTE" != generated ] || echo "             ^ shown once, save it now."
+  else
+    echo "  Sign in:   with the account you made earlier (nothing was reset)"
+  fi
+  [ "$pub" = 0 ] && echo "  It only listens on this machine. From your computer: ssh -L $port:127.0.0.1:$port <this-server>"
+  if [ "$pub" != 0 ]; then
+    echo
+    if [ "$IS_OCI" -eq 1 ]; then
+      echo "  Oracle blocks everything by default. In your VCN Security List add Ingress Rules (TCP):"
+      echo "    port $port   (this instance's dashboard; limit the source to your own IP)"
+      [ "$ports" = none ] || echo "    port(s) $ports   (what's running inside it)"
+    else
+      echo "  If it doesn't load, open TCP $port${ports:+ and $ports} in your cloud firewall / security group."
+    fi
+  fi
+  echo
+  echo "  Everything in it lives in the Docker volume console-$n-data. The host's files and services are not reachable from inside."
+  echo "  Servers running inside stop when the container restarts (their files stay); start them again from the dashboard."
+  echo "  Logs:      docker logs -f console-$n"
+  echo "  Update:    run the installer again and pick Docker, same name (keeps its data)"
+  echo "  Remove:    sudo bash install.sh --docker-remove $n [--purge]"
+  echo "${B}================================================================${N}"
+}
+
+docker_remove() {
+  local n=$DOCKER_REMOVE
+  ensure_docker
+  docker inspect "console-$n" >/dev/null 2>&1 || [ -f "$(d_env_file "$n")" ] || die "There's no Docker instance called '$n'."
+  if [ "$HAVE_TTY" -eq 1 ]; then
+    yes_no "Stop and remove the container console-$n?" n || die "Cancelled. Nothing was changed."
+    [ "$DOCKER_PURGE" -eq 0 ] || yes_no "Also DELETE its data volume (all its servers, worlds and settings)? This can't be undone." n || DOCKER_PURGE=0
+  fi
+  docker rm -f "console-$n" >/dev/null 2>&1 || true
+  rm -f "$(d_env_file "$n")"
+  ok "Removed the container console-$n"
+  if [ "$DOCKER_PURGE" -eq 1 ]; then docker volume rm "console-$n-data" >/dev/null 2>&1 && ok "Deleted its data volume"
+  else info "Its data is kept in the volume console-$n-data (add --purge to delete that too)."; fi
+}
+
+# What to do when someone is at the keyboard: the usual install/update, or an isolated Docker instance.
+pick_target() {
+  local inst choice; inst=""
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then inst=$(docker_instances | tr '\n' ' '); fi
+  echo
+  echo "${B}What would you like to do?${N}"
+  echo "      1) Install or update Console on this machine"
+  echo "      2) Create or update an isolated Docker instance  ${D}(own data, port and servers; side by side)${N}"
+  [ -z "$inst" ] || echo "      3) Remove a Docker instance  ${D}(have: $inst)${N}"
+  choice=$(ask_default "Pick one" 1)
+  case "$choice" in
+    2) DOCKER_MODE=1 ;;
+    3) if [ -n "$inst" ]; then DOCKER_REMOVE=$(ask "    Which one? "); valid_instance "$DOCKER_REMOVE" || die "Not a valid instance name."; fi ;;
+  esac
+}
+
 # ---- final report ----------------------------------------------------------------------
 
 is_mc_mode() { [ "$MODE_FLAG" = minecraft ] || { [ "$MODE_FLAG" != standard ] && [ "$(env_get CONSOLE_MODE)" = minecraft ]; }; }
@@ -796,11 +1102,18 @@ main() {
 
   parse_args "$@"
   [ "$(id -u)" -eq 0 ] || die "Run this as root:  curl -fsSL $RAW_URL | sudo bash"
-  [ -d /run/systemd/system ] || die "This needs a Linux with systemd (Oracle Linux, Ubuntu, Debian, ...)."
   detect_pm
   detect_tty
   detect_cloud
   find_public_ip || warn "Couldn't look up this server's public IP."
+
+  # Someone at the keyboard with no flags gets the choice, even on a machine that's already installed.
+  if [ "$HAVE_TTY" -eq 1 ] && [ "$DOCKER_MODE" -eq 0 ] && [ -z "$DOCKER_REMOVE" ] && [ "$RECONFIGURE" -eq 0 ] && [ -z "$DOMAIN" ] && [ "$IP_ONLY" -eq 0 ]; then
+    pick_target
+  fi
+  if [ -n "$DOCKER_REMOVE" ]; then docker_remove; return 0; fi
+  if [ "$DOCKER_MODE" -eq 1 ]; then docker_main; return 0; fi
+  [ -d /run/systemd/system ] || die "This needs a Linux with systemd (Oracle Linux, Ubuntu, Debian, ...)."
 
   PORT=${PORT_FLAG:-$(env_get PORT)}; PORT=${PORT:-3000}
   local first_run=0; [ -f "$(env_get CONSOLE_DB || true)" ] || [ -f "$DIR/data/console.db" ] || first_run=1

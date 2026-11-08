@@ -28,6 +28,18 @@ Tests: `npm test`
 
 Run the install command in a terminal and it walks you through five short steps: what the machine is for (Minecraft host or general), your admin account (type a password or let it generate one), your address (domain + HTTPS, or IP and port), GitHub (token and org), and extras (time zone, backups to keep, a Discord/Slack alert webhook, the advanced web terminal and Linux-user tools). It shows a summary and asks before it changes anything. Run it again with `--reconfigure` to change mode or address later. With `--yes` (or no terminal) it asks nothing; pass the same choices as environment variables: `CONSOLE_ADMIN_PASSWORD`, `CONSOLE_GITHUB_TOKEN`, `CONSOLE_GITHUB_ORG`, `CONSOLE_TIMEZONE`, `CONSOLE_ALERT_WEBHOOK`, `CONSOLE_BACKUP_KEEP`, `CONSOLE_ENABLE_TERMINAL=1`, `CONSOLE_ENABLE_LINUX_USERS=1`. Console applies these once on first start, only where nothing is saved yet, then the installer removes them from `/etc/console.env`.
 
+## Docker instances (isolated Consoles)
+
+Run the installer in a terminal and pick **Create or update an isolated Docker instance** (it asks every time, even on a machine that already has Console). Each instance is its own Console in a container: its own admin account, dashboard port, servers and files, kept in a Docker volume named `console-<name>-data`. It runs **side by side** with the main install and with other instances, and cannot see the host's files, services or other instances. Good for things you share, separate projects, testing, or keeping configs apart.
+
+- Includes Java 21, so Minecraft servers run inside it. Publish the game port when asked (25565 is the default in Minecraft mode); two instances can't both publish the same port.
+- Hardened: all Linux capabilities dropped, no new privileges, no host mounts, optional memory and CPU limits, optionally reachable from this machine only (use an SSH tunnel).
+- Servers running inside stop if the container restarts (their files stay in the volume); start them again from its dashboard.
+- Update: run the installer again, pick Docker, give the same name. It rebuilds the image and keeps the data.
+- No terminal? `sudo bash install.sh --docker NAME --yes` (set `CONSOLE_DOCKER_PORT`, `CONSOLE_DOCKER_PORTS`, `CONSOLE_ADMIN_PASSWORD`, and `CONSOLE_MODE_FLAG=minecraft` if you want).
+- Remove: `sudo bash install.sh --docker-remove NAME` (add `--purge` to delete its data too).
+- Not done: HTTPS for an instance. Put the host's Caddy in front of its port, or use the SSH tunnel.
+
 ## What you can do
 
 | | |

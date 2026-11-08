@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnSync, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -327,4 +327,139 @@ test("Minecraft mode is detected from the flag or the saved mode, and --standard
   assert.equal(t("standard"), "no");
   assert.equal(t("minecraft"), "yes");
   assert.equal(sh(`MODE_FLAG=''; is_mc_mode && echo yes || echo no`, { CONSOLE_ENV_FILE: envFile().file }).out.trim(), "no");
+});
+
+
+// ---- Docker instances (a fake `docker` records what it was asked to do) ----------------------
+import { mkdirSync, chmodSync, existsSync as exists } from "node:fs";
+import http from "node:http";
+
+function fakeDocker() {
+  const dir = mkdtempSync(path.join(tmpdir(), "console-fakedocker-"));
+  const log = path.join(dir, "calls.log");
+  writeFileSync(path.join(dir, "docker"), `#!/bin/bash
+printf '%s\\n' "$*" >> "${log}"
+case "$1" in
+  info) exit 0 ;;
+  ps) exit 0 ;;
+  inspect) exit 0 ;;
+  *) exit 0 ;;
+esac
+`);
+  chmodSync(path.join(dir, "docker"), 0o755);
+  return { bin: dir, calls: () => (exists(log) ? readFileSync(log, "utf8").trim().split("\n") : []) };
+}
+
+test("valid_instance / valid_ports / valid_limit guard what ends up on a docker command line", () => {
+  const t = (fn, v) => sh(`${fn} '${v}' && echo yes || echo no`).out.trim();
+  assert.equal(t("valid_instance", "mc-test_1"), "yes");
+  for (const bad of ["", "Upper", "-x", "a b", "a/b", "../x", "a".repeat(40)]) assert.equal(t("valid_instance", bad), "no", bad);
+  assert.equal(t("valid_ports", "25565,8080"), "yes");
+  assert.equal(t("valid_ports", "none"), "yes");
+  for (const bad of ["", "0", "70000", "25565;rm", "a", "1,,2"]) assert.equal(t("valid_ports", bad), "no", bad);
+  assert.equal(t("valid_limit", "4g"), "yes");
+  assert.equal(t("valid_limit", "1.5"), "yes");
+  assert.equal(t("valid_limit", "4g --privileged"), "no");
+});
+
+test("docker run arguments: hardened, own volume, loopback-only when asked, no host mounts", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "console-dock-"));
+  const r = sh(
+    `d_denv_set t1 CONSOLE_D_PORT 3101; d_denv_set t1 CONSOLE_D_PORTS 25565,8080; d_denv_set t1 CONSOLE_D_PUBLIC 1; d_denv_set t1 CONSOLE_D_MEM 4g; d_denv_set t1 CONSOLE_D_CPUS 2
+docker_run_args t1 | tr '\\n' ' '; echo
+d_denv_set t2 CONSOLE_D_PORT 3102; d_denv_set t2 CONSOLE_D_PORTS none; d_denv_set t2 CONSOLE_D_PUBLIC 0
+docker_run_args t2 | tr '\\n' ' '`,
+    { CONSOLE_DOCKER_ENV_DIR: dir }
+  );
+  const [a, b] = r.out.trim().split("\n");
+  assert.match(a, /run -d --init --name console-t1 --label console.instance=t1 --restart unless-stopped/);
+  assert.match(a, /-v console-t1-data:\/data/);
+  assert.match(a, /-p 0\.0\.0\.0:3101:3000/);
+  assert.match(a, /-p 0\.0\.0\.0:25565:25565 -p 0\.0\.0\.0:8080:8080/);
+  assert.match(a, /--cap-drop ALL --security-opt no-new-privileges/);
+  assert.match(a, /--memory 4g --cpus 2 console:local $/);
+  assert.match(b, /-p 127\.0\.0\.1:3102:3000/);
+  assert.doesNotMatch(b, /25565|--memory/);
+  for (const line of [a, b]) {
+    assert.doesNotMatch(line, /--privileged|docker\.sock|--pid[ =]|--network host|-v \//, "never mounts the host or shares its namespaces");
+  }
+});
+
+test("docker instance end to end (fake docker): builds, writes a private env file, starts, scrubs one-time secrets, updating keeps data", async () => {
+  const fd = fakeDocker();
+  const envDir = mkdtempSync(path.join(tmpdir(), "console-denv-"));
+  const repo = mkdtempSync(path.join(tmpdir(), "console-drepo-"));
+  mkdirSync(path.join(repo, "deploy"));
+  writeFileSync(path.join(repo, "deploy", "Dockerfile"), "FROM scratch\n");
+  for (const c of [["init", "-q", "-b", "main"], ["add", "-A"], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x"]]) spawnSync("git", c, { cwd: repo });
+  // pretend container: answers on a port
+  const srv = http.createServer((_q, res) => res.end("{}"));
+  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  const port = srv.address().port;
+  const env = {
+    PATH: `${fd.bin}:${process.env.PATH}`, CONSOLE_DOCKER_ENV_DIR: envDir, CONSOLE_DOCKER_SRC: path.join(mkdtempSync(path.join(tmpdir(), "console-dsrc-")), "src"),
+    CONSOLE_REPO: repo, CONSOLE_DOCKER_PORT: String(port), CONSOLE_DOCKER_PORTS: "25565", CONSOLE_DOCKER_PUBLIC: "0", CONSOLE_ADMIN_PASSWORD: "Sup3r-long_pass",
+  };
+  const snippet = (name) => `open_ports() { echo "OPEN $*"; }; MODE_FLAG=minecraft; ADMIN_PW_PRESET="$CONSOLE_ADMIN_PASSWORD"; unset CONSOLE_ADMIN_PASSWORD; HAVE_TTY=0; DOCKER_NAME=${name}; PUBLIC_IP=203.0.113.5; docker_main`;
+  // async spawn: the fake "container" HTTP server lives in this process and must keep answering
+  const run = (name) => new Promise((resolve) => {
+    const c = spawn("bash", ["-c", `CONSOLE_INSTALL_SOURCE_ONLY=1 source ./install.sh\n${snippet(name)}`], { cwd: root, env: { ...process.env, ...env } });
+    let stdout = "", stderr = "";
+    c.stdout.on("data", (d) => (stdout += d));
+    c.stderr.on("data", (d) => (stderr += d));
+    c.on("close", (status) => resolve({ status, stdout, stderr }));
+  });
+  const r1 = run("t1");
+  const p1 = await r1;
+  srv.close();
+  assert.equal(p1.status, 0, p1.stderr + p1.stdout);
+  const calls = fd.calls();
+  assert.ok(calls.some((c) => c.startsWith("build -q -f") && c.includes(" -t console:local ")), calls.join("\n"));
+  const runs = calls.filter((c) => c.startsWith("run -d"));
+  assert.equal(runs.length, 2, "started once, recreated once to scrub the one-time secrets");
+  assert.match(runs[0], /-v console-t1-data:\/data/);
+  assert.match(runs[0], /-p 127\.0\.0\.1:\d+:3000 -.*-p 127\.0\.0\.1:25565:25565/);
+  const file = path.join(envDir, "t1.env");
+  const mode = statSync(file).mode & 0o777;
+  assert.equal(mode, 0o600);
+  const saved = readFileSync(file, "utf8");
+  assert.match(saved, /^CONSOLE_MODE=minecraft$/m);
+  assert.match(saved, /^HOST=0\.0\.0\.0$/m);
+  assert.doesNotMatch(saved, /Sup3r-long_pass|CONSOLE_ADMIN_PASSWORD/, "first-run password removed after start");
+  assert.match(p1.stdout, /Docker instance 't1' is running/);
+  assert.match(p1.stdout, /Sign in:\s+admin\s+\/\s+the password you set/);
+  assert.doesNotMatch(p1.stdout + p1.stderr, /Sup3r-long_pass/);
+
+  // Updating the same name keeps its settings and does not ask for or reset anything.
+  const srv2 = http.createServer((_q, res) => res.end("{}"));
+  await new Promise((r) => srv2.listen(port, "127.0.0.1", r));
+  const p2 = await run("t1");
+  srv2.close();
+  assert.equal(p2.status, 0, p2.stderr + p2.stdout);
+  assert.match(p2.stdout, /nothing was reset/);
+  assert.equal(readFileSync(file, "utf8"), saved, "settings file untouched by an update");
+});
+
+test("docker-remove: stops the container, keeps the data unless --purge", () => {
+  const fd = fakeDocker();
+  const envDir = mkdtempSync(path.join(tmpdir(), "console-denv-"));
+  writeFileSync(path.join(envDir, "old.env"), "X=1\n");
+  const base = { PATH: `${fd.bin}:${process.env.PATH}`, CONSOLE_DOCKER_ENV_DIR: envDir };
+  const keep = sh(`DOCKER_REMOVE=old; docker_remove`, base);
+  assert.equal(keep.code, 0, keep.err);
+  assert.ok(fd.calls().includes("rm -f console-old"));
+  assert.ok(!fd.calls().some((c) => c.startsWith("volume rm")));
+  assert.ok(!exists(path.join(envDir, "old.env")));
+  assert.match(keep.out, /data is kept/);
+  writeFileSync(path.join(envDir, "old.env"), "X=1\n");
+  const purge = sh(`DOCKER_REMOVE=old; DOCKER_PURGE=1; docker_remove`, base);
+  assert.ok(fd.calls().includes("volume rm console-old-data"));
+  assert.equal(purge.code, 0, purge.err);
+});
+
+test("--docker name parsing; a bad name is refused before anything runs", () => {
+  assert.equal(sh(`parse_args --docker mc-test --yes; echo "$DOCKER_MODE $DOCKER_NAME"`).out.trim(), "1 mc-test");
+  assert.equal(sh(`parse_args --docker --yes; echo "$DOCKER_MODE [$DOCKER_NAME]"`).out.trim(), "1 []");
+  assert.equal(sh(`parse_args --docker 'Bad Name'`).code, 1);
+  assert.equal(sh(`parse_args --docker-remove '../x'`).code, 1);
 });
