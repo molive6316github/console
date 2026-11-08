@@ -11,6 +11,7 @@ import { createSetups } from "./setups/index.js";
 import { getServer } from "./db.js";
 import { createTerminal } from "./terminal.js";
 import { createLinuxUsers } from "./linuxusers.js";
+import { createMc } from "./mc/index.js";
 
 // Wires the long-lived pieces together. Nothing runs on a timer until start() is called.
 export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverOptions = {}, setupOptions = {}, terminalOptions = {}, linuxOptions = {} } = {}) {
@@ -28,6 +29,7 @@ export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverO
   const monitor = createMonitor({ db, notifier, getStatus: (s) => runtime.status(s), now, sampler });
   const scheduler = createScheduler({ db, runtime, now });
   const jobs = createJobs();
+  const mc = createMc({ runtime });
   const terminal = createTerminal({ db, ...terminalOptions });
   const linux = createLinuxUsers({ selfUser: setupOptions.user ?? os.userInfo().username, ...linuxOptions });
   const setups = createSetups({
@@ -55,6 +57,7 @@ export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverO
     setups,
     terminal,
     linux,
+    mc,
     start({ monitorSec = 60 } = {}) {
       scheduler.start();
       if (monitorSec > 0) monitor.start(monitorSec * 1000);

@@ -14,6 +14,7 @@ import { discoverRoutes } from "./routes/discover.js";
 import { setupRoutes } from "./routes/setup.js";
 import { terminalRoutes } from "./routes/terminal.js";
 import { linuxRoutes } from "./routes/linux.js";
+import { mcRoutes } from "./routes/mc.js";
 import { getSetting } from "./db.js";
 import {
   verifyPassword,
@@ -139,6 +140,7 @@ export function buildApp({
     role: req.user.role,
     allServers: req.user.allServers,
     safeMode,
+    mode: process.env.CONSOLE_MODE === "minecraft" ? "minecraft" : "standard",
     version,
     bootId,
     // Opt-in advanced tools: only admins are told they exist, and only when switched on.
@@ -198,6 +200,7 @@ export function buildApp({
   discoverRoutes(app, { ...ctx, discover: services.discover });
   setupRoutes(app, { ...ctx, setups: services.setups, jobs: services.jobs });
   terminalRoutes(app, { ...ctx, terminal: services.terminal });
+  mcRoutes(app, { ...ctx, mc: services.mc });
   linuxRoutes(app, { ...ctx, linux: services.linux, featureOn: () => getSetting(db, "linux_users_enabled", "0") === "1" });
 
   // Restart Console (admin). Under systemd it comes straight back; elsewhere it just says so.

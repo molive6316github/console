@@ -2,9 +2,12 @@ import { h, api, toast, dot, lifecycle, bytes, when, sqlTime, setLeaveGuard } fr
 import { actionButtons, uptimeText } from "./servers.js";
 import { serverForm } from "./serverForm.js";
 import { followJob } from "./create.js";
+import { playersTab, gameTab } from "./minecraft.js";
 
 const TABS = [
   { id: "console", label: "Console", show: (s) => s.caps.logs || s.canSend },
+  { id: "players", label: "Players", show: (s) => Boolean(s.mc) && s.canSend },
+  { id: "game", label: "Game settings", show: (s, me) => Boolean(s.mc) && me.role === "admin" },
   { id: "files", label: "Files", show: (s) => s.canEditFiles },
   { id: "backups", label: "Backups", show: (s) => s.canBackup },
   { id: "activity", label: "Activity", show: (_s, me) => me.role === "admin" },
@@ -49,7 +52,7 @@ export function serverView(box, { me, id, tab }) {
     drawTabs();
     if (!want) return void body.append(h("div", { class: "empty" }, "Nothing to show for this server with your permissions."));
     tabLife = lifecycle();
-    const view = { console: consoleTab, files: filesTab, backups: backupsTab, activity: activityTab, settings: settingsTab }[want.id];
+    const view = { console: consoleTab, players: playersTab, game: gameTab, files: filesTab, backups: backupsTab, activity: activityTab, settings: settingsTab }[want.id];
     view(body, { server, me, life: tabLife, reload: () => load(true) });
   }
 

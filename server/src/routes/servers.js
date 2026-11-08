@@ -7,6 +7,7 @@ import { uptimePercent } from "../monitor.js";
 import { validateServerInput, idTaken, InputError } from "../servers.js";
 import { createFiles, FileError } from "../files.js";
 import { BACKUP_NAME } from "../backups.js";
+import { mcRoot, mcKind } from "../mc/index.js";
 
 const DAY = 86_400_000;
 
@@ -50,6 +51,7 @@ export function serverRoutes(app, { db, need, runtime, safeMode }) {
       canEditFiles: isAdmin && caps.files && !safeMode,
       canBackup: isAdmin && caps.files,
       canEditConfig: isAdmin && s.source === "ui" && !safeMode,
+      mc: (() => { const r = mcRoot(s); return r ? { kind: mcKind(r) } : null; })(),
     };
   }
 

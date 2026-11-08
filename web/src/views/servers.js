@@ -45,7 +45,7 @@ export function serversView(box, { me }) {
     summary.textContent = servers.length ? `${up} of ${servers.length} up` : "";
     if (!servers.length) {
       grid.replaceChildren(
-        h("div", { class: "empty" }, me.role === "admin" ? "No servers yet. Add your first one." : "No servers have been shared with you yet.")
+        h("div", { class: "empty" }, me.role === "admin" ? (me.mode === "minecraft" ? h("div", {}, h("p", {}, "No Minecraft server yet."), h("a", { class: "btn primary", href: "#/create/minecraft" }, "Create your Minecraft server")) : "No servers yet. Add your first one.") : "No servers have been shared with you yet.")
       );
       return;
     }

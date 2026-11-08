@@ -261,3 +261,4 @@ body.termpage { display: flex; flex-direction: column; height: 100vh; margin: 0;
 .linuxrow code { font-size: 12px; }
 .warn { border-color: var(--unknown); }
 .notice { margin-bottom: 12px; }
+.stack label.check { flex-direction: row; align-items: center; color: var(--text); }

@@ -16,6 +16,7 @@
 #   --branch NAME   git branch to install from (default main)
 #   --dir PATH      where to install (default /opt/console)
 #   --user NAME     Linux user Console runs as (default: the user who ran sudo, e.g. opc; else a new 'console' user)
+#   --minecraft     set this machine up as a Minecraft host (simpler menu, Minecraft first). --standard turns it off.
 #   --yes           never ask questions
 # Environment
 #   CF_API_TOKEN              Cloudflare token (Zone:Read + DNS:Edit). Used once, never stored or printed.
@@ -37,6 +38,7 @@ USER_FLAG="${CONSOLE_USER:-}"
 CADDY_DIR="/etc/caddy"
 
 IP_ONLY=0
+MODE_FLAG="${CONSOLE_MODE_FLAG:-}"
 ASSUME_YES=0
 HAVE_TTY=0
 PM=""
@@ -73,6 +75,7 @@ Console installer. Run as root; safe to repeat.
   --branch NAME   git branch to install from (default main)
   --dir PATH      where to install (default /opt/console)
   --user NAME     Linux user Console runs as (default: you, the user who ran sudo)
+  --minecraft     set this machine up as a Minecraft host (--standard turns that off)
   --yes           never ask questions
 EOF
 }
@@ -140,6 +143,8 @@ write_env() {
     env_del CONSOLE_DOMAIN
   fi
   [ -z "$SVC_USER" ] || env_set CONSOLE_RUN_USER "$SVC_USER"
+  # Minecraft mode is remembered; --standard switches it off again.
+  case "$MODE_FLAG" in minecraft) env_set CONSOLE_MODE minecraft ;; standard) env_del CONSOLE_MODE ;; esac
   [ -z "$PUBLIC_IP" ] || env_set CONSOLE_PUBLIC_IP "$PUBLIC_IP"
   if [ "$BRANCH" = main ]; then env_del CONSOLE_UPDATE_BRANCH; else env_set CONSOLE_UPDATE_BRANCH "$BRANCH"; fi
 }
@@ -185,6 +190,8 @@ parse_args() {
       --branch)   [ $# -ge 2 ] || die "--branch needs a value"; BRANCH="$2"; shift 2 ;;
       --dir)      [ $# -ge 2 ] || die "--dir needs a value"; DIR="$2"; shift 2 ;;
       --user)     [ $# -ge 2 ] || die "--user needs a value"; USER_FLAG="$2"; shift 2 ;;
+      --minecraft) MODE_FLAG=minecraft; shift ;;
+      --standard) MODE_FLAG=standard; shift ;;
       --yes|-y)   ASSUME_YES=1; shift ;;
       -h|--help)  usage; exit 0 ;;
       *)          die "Unknown option: $1 (try --help)" ;;

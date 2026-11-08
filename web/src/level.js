@@ -6,10 +6,16 @@ export const LEVELS = [
 ];
 const ORDER = LEVELS.map((l) => l.id);
 let current = "standard";
+let stored = false;
 try {
   const v = localStorage.getItem("console.level");
-  if (ORDER.includes(v)) current = v;
+  if (ORDER.includes(v)) ((current = v), (stored = true));
 } catch { /* storage blocked: keep the default */ }
+
+// A first-time visitor on a Minecraft-mode install starts on Simple. Anything they chose themselves wins.
+export function defaultLevel(id) {
+  if (!stored && ORDER.includes(id)) current = id;
+}
 
 export const getLevel = () => current;
 export function setLevel(id) {

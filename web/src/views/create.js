@@ -86,6 +86,9 @@ async function load(box, param, life, me) {
   } catch (err) {
     return void box.append(h("div", { class: "error" }, err.message));
   }
+  // Minecraft-mode installs keep Create focused: just Minecraft, until you switch to Advanced.
+  const mcOnly = me.mode === "minecraft" && !atLeast("advanced");
+  if (mcOnly) catalog = catalog.filter((x) => x.id === "minecraft");
   const t = param && catalog.find((x) => x.id === param);
   if (t) return void form(box, t, st, life);
 

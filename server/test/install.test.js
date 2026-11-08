@@ -180,3 +180,14 @@ test("main is the last thing in the script (it is read piped from curl, so nothi
   const lines = readFileSync(path.join(root, "install.sh"), "utf8").trimEnd().split("\n");
   assert.deepEqual(lines.slice(-3), ['if [ "${CONSOLE_INSTALL_SOURCE_ONLY:-0}" != 1 ]; then', '  main "$@"', "fi"]);
 });
+
+test("--minecraft is remembered in the env file and --standard turns it off", () => {
+  const e = envFile("");
+  sh(`MODE_FLAG=minecraft; DOMAIN=""; PORT=3000; DIR=/opt/console; BRANCH=main; write_env`, { CONSOLE_ENV_FILE: e.file });
+  assert.match(e.read(), /^CONSOLE_MODE=minecraft$/m);
+  sh(`MODE_FLAG=""; DOMAIN=""; PORT=3000; DIR=/opt/console; BRANCH=main; write_env`, { CONSOLE_ENV_FILE: e.file });
+  assert.match(e.read(), /^CONSOLE_MODE=minecraft$/m); // untouched when no flag is given
+  sh(`MODE_FLAG=standard; DOMAIN=""; PORT=3000; DIR=/opt/console; BRANCH=main; write_env`, { CONSOLE_ENV_FILE: e.file });
+  assert.doesNotMatch(e.read(), /CONSOLE_MODE/);
+  assert.equal(sh(`parse_args --minecraft --yes; echo $MODE_FLAG`).out.trim(), "minecraft");
+});

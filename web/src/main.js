@@ -12,7 +12,7 @@ import { updatesView } from "./views/updates.js";
 import { discoverView, newServerView } from "./views/discover.js";
 import { createView } from "./views/create.js";
 import { linuxView } from "./views/linux.js";
-import { LEVELS, atLeast, getLevel, setLevel } from "./level.js";
+import { LEVELS, atLeast, getLevel, setLevel, defaultLevel } from "./level.js";
 
 const app = document.getElementById("app");
 let me = null;
@@ -60,7 +60,7 @@ const isAdmin = () => me.role === "admin";
 
 // What shows up depends on the experience level (Simple / Standard / Advanced) as well as on the role.
 function navItems() {
-  const items = [["#/", "Servers", "servers"]];
+  const items = [["#/", me.mode === "minecraft" ? "My servers" : "Servers", "servers"]];
   if (isAdmin() && !me.safeMode) items.push(["#/create", "Create", "create"]);
   if (atLeast("standard") && (isAdmin() || me.allServers)) items.push(["#/host", "Host", "host"]);
   if (isAdmin()) {
@@ -142,7 +142,7 @@ function renderShell() {
       h(
         "header",
         {},
-        h("a", { class: "brand", href: "#/" }, "Console"),
+        h("a", { class: "brand", href: "#/" }, me.mode === "minecraft" ? "Console ⛏️" : "Console"),
         navEl,
         h(
           "div",
@@ -179,6 +179,7 @@ async function boot() {
   } catch {
     return renderLogin();
   }
+  if (me.mode === "minecraft") defaultLevel("simple");
   renderShell();
   render();
   if (isAdmin()) {
