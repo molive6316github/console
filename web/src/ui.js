@@ -1,6 +1,12 @@
 // Small DOM helper. Everything goes through textContent / text nodes, so server data can't inject HTML.
 const SVG_NS = "http://www.w3.org/2000/svg";
 
+// replaceChildren/append turn null and false into the literal text "null"/"false". Skip them like h() does.
+for (const m of ["replaceChildren", "append", "prepend"]) {
+  const orig = Element.prototype[m];
+  Element.prototype[m] = function (...nodes) { return orig.apply(this, nodes.flat(Infinity).filter((n) => n != null && n !== false)); };
+}
+
 function apply(el, props) {
   for (const [k, v] of Object.entries(props)) {
     if (k === "class") el.setAttribute("class", v);

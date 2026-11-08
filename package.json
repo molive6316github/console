@@ -1,6 +1,6 @@
 {
   "name": "mxt-console",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "type": "module",
   "description": "Web dashboard for starting, stopping and watching all kinds of servers. One-click Minecraft, Docker and Node setups, backups, schedules.",
   "engines": {
