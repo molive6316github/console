@@ -6,6 +6,7 @@ import { pipeline } from "node:stream/promises";
 import path from "node:path";
 import { McError } from "./props.js";
 import { parseRepo, RepoError } from "../gitutil.js";
+import { CATALOG, CATEGORIES, BUNDLES, catalogSlugs } from "./catalog.js";
 
 const UA = "molive6316github-console (minecraft plugin manager)";
 const JAR = /^[A-Za-z0-9][A-Za-z0-9._+() \-]{0,150}\.jar(\.disabled)?$/;
@@ -153,7 +154,60 @@ export function createPlugins({ fetchImpl, getToken = () => "", getMeta = () => 
     const dest = path.join(dir, name);
     if (existsSync(dest)) throw new McError(`${name} is already installed`);
     const size = await download(fetchImpl, file.url, dest, { hosts: MODRINTH_HOSTS, sha512: file.hashes?.sha512, sha1: file.hashes?.sha1 });
-    return { file: name, size, version: v.version_number };
+    const deps = (v.dependencies ?? []).filter((d) => d.dependency_type === "required" && /^[A-Za-z0-9]{6,12}$/.test(String(d.project_id))).map((d) => d.project_id);
+    return { file: name, size, version: v.version_number, deps };
+  }
+
+  // ---- the curated catalog ----
+  const cache = new Map(); // `${kind}|${gv}` -> { at, list }
+  async function catalog({ kind, id, version }) {
+    const meta = getMeta(id);
+    const gv = gameVersion(meta, version);
+    const key = `${kind}|${gv}`;
+    const hit = cache.get(key);
+    if (hit && Date.now() - hit.at < 6 * 3600_000) return hit.data;
+    const slugs = [...catalogSlugs()];
+    const ids = encodeURIComponent(JSON.stringify(slugs));
+    const projects = await getJson(fetchImpl, `https://api.modrinth.com/v2/projects?ids=${ids}`);
+    const loaders = loadersFor(kind, meta);
+    const ok = new Map(projects.filter((p) => p.project_type === (kind === "mods" ? "mod" : "plugin") && (p.loaders ?? []).some((l) => loaders.includes(l)) && (!gv || (p.game_versions ?? []).includes(gv))).map((p) => [p.slug, p]));
+    const items = CATALOG.map((c) => {
+      const slug = [c.slug, ...(c.alt ?? [])].find((x) => ok.has(x));
+      return slug ? { ...c, slug, alt: undefined, downloads: ok.get(slug).downloads } : null;
+    }).filter(Boolean);
+    const live = (want) => items.find((i) => i.slug === want || CATALOG.find((c) => c.slug === want)?.alt?.includes(i.slug))?.slug;
+    const bundles = BUNDLES.map((b) => ({ ...b, slugs: b.slugs.map(live).filter(Boolean) })).filter((b) => b.slugs.length >= 2);
+    const data = { gameVersion: gv, kind, categories: CATEGORIES.filter((c) => items.some((i) => i.category === c.id)), items: items.map(({ alt, ...i }) => i), bundles, unavailable: CATALOG.length - items.length };
+    cache.set(key, { at: Date.now(), data });
+    return data;
+  }
+
+  // Installs the chosen catalog plugins plus whatever they list as required, skipping what's already there.
+  async function installMany({ root, kind, id, slugs, version }) {
+    const allowed = catalogSlugs();
+    const queue = [...new Set(slugs)].filter((x) => allowed.has(x));
+    if (!queue.length) throw new McError("Pick something from the list");
+    const results = [];
+    const seen = new Set();
+    while (queue.length && results.length < 25) {
+      const slug = queue.shift();
+      if (seen.has(slug)) continue;
+      seen.add(slug);
+      try {
+        const r = await modrinthInstall({ root, kind, id, slug, version });
+        results.push({ slug, ok: true, file: r.file, version: r.version });
+        for (const pid of r.deps) {
+          try {
+            const p = await getJson(fetchImpl, `https://api.modrinth.com/v2/project/${pid}`);
+            if (p.slug && !seen.has(p.slug)) queue.push(p.slug);
+          } catch { /* a dependency we can't look up is reported by the plugin itself at startup */ }
+        }
+      } catch (e) {
+        const already = /already installed/.test(e.message);
+        results.push({ slug, ok: already, skipped: already, error: already ? undefined : e.message });
+      }
+    }
+    return { results };
   }
 
   // ---- GitHub (bring your own token) ---------------------------------------------------
@@ -206,5 +260,5 @@ export function createPlugins({ fetchImpl, getToken = () => "", getMeta = () => 
     return { file: safe, size, tag: rel.tag };
   }
 
-  return { list, setEnabled, remove, modrinthSearch, modrinthInstall, githubRepos, githubReleases, githubInstall };
+  return { list, setEnabled, remove, modrinthSearch, modrinthInstall, catalog, installMany, githubRepos, githubReleases, githubInstall };
 }

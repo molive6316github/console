@@ -147,13 +147,59 @@ export async function pluginsTab(box, { server, me }) {
   const installed = h("div", {});
   const modrinth = h("div", {});
   const github = h("div", {});
+  const shelf = h("div", {});
   box.append(
     h("p", { class: "notice" }, `Installing a ${kindWord} runs someone else's code on your server. Only add ones you trust. Changes apply after a restart.`),
+    shelf,
     h("div", { class: "panel" }, h("h2", {}, `Installed ${kindWord}s`), installed),
     h("div", { class: "panel" }, h("h2", {}, "Find on Modrinth"), modrinth),
     h("div", { class: "panel" }, h("h2", {}, "From GitHub"), github)
   );
   const base = `/servers/${encodeURIComponent(server.id)}/mc`;
+
+  async function drawShelf() {
+    let c;
+    try {
+      c = await api(`${base}/catalog`);
+    } catch (e) {
+      return void shelf.replaceChildren(h("div", { class: "panel" }, h("h2", {}, "One-click picks"), h("p", { class: "muted" }, `Couldn't load the list: ${e.message}`)));
+    }
+    const have = new Set((await api(`${base}/plugins`).then((r) => r.files).catch(() => [])).map((f) => f.file.toLowerCase()));
+    const isHere = (slug) => [...have].some((f) => f.includes(slug.replace(/-hikari|-player-analytics/g, "").replace(/unlocked/, "")));
+    const out = h("div", {});
+    async function install(slugs, btn) {
+      btn.disabled = true;
+      const was = btn.textContent;
+      btn.textContent = "Installing…";
+      try {
+        const { results } = await api(`${base}/catalog/install`, { method: "POST", body: { slugs } });
+        const bad = results.filter((r) => !r.ok);
+        const added = results.filter((r) => r.ok && !r.skipped);
+        out.replaceChildren(h("div", { class: bad.length ? "notice" : "jobstatus good" }, added.length ? `Installed ${added.map((r) => r.slug).join(", ")}. Restart the server to load ${added.length === 1 ? "it" : "them"}.` : "Already installed.", bad.length ? ` Couldn't install: ${bad.map((r) => `${r.slug} (${r.error})`).join("; ")}` : ""));
+        drawInstalled();
+        drawShelf();
+      } catch (e) {
+        toast(e.message, true);
+        btn.disabled = false;
+        btn.textContent = was;
+      }
+    }
+    const card = (i) => {
+      const done = isHere(i.slug);
+      const b = h("button", { class: done ? "" : "primary", disabled: done }, done ? "Installed" : "Add");
+      b.onclick = () => install([i.slug], b);
+      return h("div", { class: "pick" }, h("div", { class: "pt" }, h("strong", {}, i.title), b), h("div", { class: "muted small" }, i.blurb));
+    };
+    shelf.replaceChildren(
+      h("div", { class: "panel" },
+        h("h2", {}, "One-click picks"),
+        c.bundles.length ? h("div", { class: "bundles" }, ...c.bundles.map((b) => { const btn = h("button", { class: "primary" }, "Install all"); btn.onclick = () => install(b.slugs, btn); return h("div", { class: "pick bundle" }, h("div", { class: "pt" }, h("strong", {}, b.title), btn), h("div", { class: "muted small" }, b.blurb)); })) : null,
+        out,
+        ...c.categories.map((cat) => h("div", {}, h("h3", {}, cat.label, h("span", { class: "muted small" }, `  ${cat.blurb}`)), h("div", { class: "picks" }, ...c.items.filter((i) => i.category === cat.id).map(card)))),
+        h("p", { class: "muted small" }, `Showing what works with Minecraft ${c.gameVersion ?? "(your version)"}. Anything a plugin needs to run comes along automatically.`))
+    );
+  }
+  drawShelf();
 
   async function drawInstalled() {
     try {

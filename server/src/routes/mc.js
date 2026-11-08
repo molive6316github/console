@@ -49,6 +49,12 @@ export function mcRoutes(app, { db, need, allow, mc, safeMode }) {
     auditIt(req, "plugin_install", `modrinth:${req.body?.slug} ${r.file}`);
     return r;
   }));
+  app.get("/api/servers/:id/mc/catalog", { preHandler: asPlugins }, wrap(async (req) => mc.plugins.catalog(req.srv, req.query?.version)));
+  app.post("/api/servers/:id/mc/catalog/install", { preHandler: edit }, wrap(async (req) => {
+    const r = await mc.plugins.installMany(req.srv, req.body?.slugs, req.body?.version);
+    auditIt(req, "plugin_install", `catalog: ${r.results.filter((x) => x.ok && !x.skipped).map((x) => x.slug).join(", ") || "nothing new"}`);
+    return r;
+  }));
   app.get("/api/github/repos", { preHandler: allow("plugins") }, wrap(async (req) => mc.plugins.githubRepos(req.query?.owner)));
   app.get("/api/github/releases", { preHandler: allow("plugins") }, wrap(async (req) => mc.plugins.githubReleases(req.query?.repo)));
   app.post("/api/servers/:id/mc/github/install", { preHandler: edit }, wrap(async (req) => {

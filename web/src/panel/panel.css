@@ -85,3 +85,8 @@ input[type="range"] { flex: 1; min-width: 160px; accent-color: var(--grass); }
 .badgebox { margin-left: auto; }
 .updatebadge { background: var(--grass-d); color: #fff; padding: 4px 12px; border-radius: 999px; font-size: 13px; text-decoration: none; }
 .topbar { flex-wrap: wrap; }
+.picks, .bundles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin: 8px 0 14px; }
+.pick { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.pick .pt { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.pick.bundle { border-color: var(--grass-d); }
+.panel h3 { margin: 16px 0 4px; font-size: 15px; }

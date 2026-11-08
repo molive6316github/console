@@ -245,6 +245,8 @@ export function createMc({ saveMeta = () => {}, saveTarget = () => {}, validateT
       remove: async (server, file) => { const { root, kind } = rootKind(server); return plugins.remove(root, kind, file); },
       modrinthSearch: (server, q, version) => { const { kind } = rootKind(server); return plugins.modrinthSearch({ kind, id: server.id, q, version }); },
       modrinthInstall: (server, slug, version) => { const { root, kind } = rootKind(server); return plugins.modrinthInstall({ root, kind, id: server.id, slug, version }); },
+      catalog: (server, version) => { const { kind } = rootKind(server); return plugins.catalog({ kind, id: server.id, version }); },
+      installMany: (server, slugs, version) => { const { root, kind } = rootKind(server); return plugins.installMany({ root, kind, id: server.id, slugs: Array.isArray(slugs) ? slugs.map(String) : [], version }); },
       githubRepos: (owner) => plugins.githubRepos(owner),
       githubReleases: (repo) => plugins.githubReleases(repo),
       githubInstall: (server, repo, assetId) => { const { root, kind } = rootKind(server); return plugins.githubInstall({ root, kind, repo, assetId }); },
