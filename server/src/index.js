@@ -15,16 +15,20 @@ const HOST = process.env.HOST ?? "127.0.0.1";
 const DB_FILE = process.env.CONSOLE_DB ?? path.join(root, "data", "console.db");
 const SERVERS_FILE = process.env.CONSOLE_SERVERS ?? path.join(root, "servers.json");
 
-const STARTER = [
-  { id: "demo-web", name: "Demo Web (fake)", type: "dummy", target: { startsUp: true } },
-  { id: "demo-db", name: "Demo DB (fake)", type: "dummy", target: { startsUp: false } },
-  { id: "demo-worker", name: "Demo Worker (fake)", type: "dummy", target: { startsUp: true } },
-];
-
+// Old versions wrote three fake demo servers on first run. If that file is still untouched, clear it out.
+const isOldDemo = (text) => {
+  try {
+    const l = JSON.parse(text);
+    return Array.isArray(l) && l.length === 3 && l.every((x) => x.type === "dummy" && ["demo-web", "demo-db", "demo-worker"].includes(x.id));
+  } catch {
+    return false;
+  }
+};
 if (!existsSync(SERVERS_FILE)) {
-  writeFileSync(SERVERS_FILE, JSON.stringify(STARTER, null, 2) + "\n");
-  console.log(`No servers.json found. Wrote a starter one with 3 fake servers: ${SERVERS_FILE}`);
-  console.log("See servers.example.json for docker / systemd / tmux / http examples.\n");
+  writeFileSync(SERVERS_FILE, "[]\n");
+} else if (isOldDemo(readFileSync(SERVERS_FILE, "utf8"))) {
+  writeFileSync(SERVERS_FILE, "[]\n");
+  console.log("Removed the old fake demo servers.");
 }
 
 const db = openDb(DB_FILE);
