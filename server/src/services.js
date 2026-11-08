@@ -9,6 +9,8 @@ import os from "node:os";
 import { createJobs } from "./jobs.js";
 import { createSetups } from "./setups/index.js";
 import { getServer, getSetting, setSetting } from "./db.js";
+import { createStartup, restartCrons } from "./mc/startup.js";
+import { getDriver } from "./drivers/index.js";
 import { createTerminal } from "./terminal.js";
 import { createLinuxUsers } from "./linuxusers.js";
 import { createMc } from "./mc/index.js";
@@ -26,7 +28,8 @@ export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverO
     ...discoverOptions,
   });
   const notifier = createNotifier({ db, fetchImpl });
-  const monitor = createMonitor({ db, notifier, getStatus: (s) => runtime.status(s), now, sampler });
+  let startupRef = null;
+  const monitor = createMonitor({ db, notifier, getStatus: (s) => runtime.status(s), now, sampler, onCrash: (s) => startupRef?.onCrash(s, runtime.perform) });
   let mcRef = null;
   const scheduler = createScheduler({ db, runtime, now, runMc: (...a) => mcRef.scheduled(...a) });
   const jobs = createJobs();
@@ -55,6 +58,24 @@ export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverO
     dataDir: dir,
   });
   mcRef = mc;
+  const startup = createStartup({
+    getServer: (id) => getServer(db, id),
+    saveTarget: (id, target) => db.prepare("UPDATE servers SET target = ? WHERE id = ?").run(JSON.stringify(target), id),
+    validateTarget: (type, target) => getDriver(type).validate(target),
+    cfgGet: (id) => { try { return JSON.parse(getSetting(db, `mcstart.${id}`, "") || "null"); } catch { return null; } },
+    cfgSet: (id, v) => setSetting(db, `mcstart.${id}`, JSON.stringify(v)),
+    hostMemMb: () => Math.round(os.totalmem() / 1048576),
+    setDaily: (id, hhmm) => {
+      db.prepare("DELETE FROM schedules WHERE server_id = ? AND created_by = 'panel:restart'").run(id);
+      if (!hhmm) return;
+      const c = restartCrons(hhmm);
+      const add = db.prepare("INSERT INTO schedules (server_id, action, arg, cron, enabled, created_by) VALUES (?, ?, ?, ?, 1, 'panel:restart')");
+      add.run(id, "command", "say Server restarting in 5 minutes!", c.warn);
+      add.run(id, "restart", null, c.go);
+    },
+    now: now ?? (() => Date.now()),
+  });
+  startupRef = startup;
   return {
     runtime,
     discover,
@@ -66,6 +87,7 @@ export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverO
     terminal,
     linux,
     mc,
+    startup,
     start({ monitorSec = 60 } = {}) {
       scheduler.start();
       if (monitorSec > 0) monitor.start(monitorSec * 1000);

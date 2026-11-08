@@ -85,7 +85,7 @@ export async function resolveDownload(fetchImpl, flavor, version) {
   throw fail("Unknown server type");
 }
 
-async function download(fetchImpl, url, dest, log) {
+export async function download(fetchImpl, url, dest, log) {
   const host = new URL(url).hostname;
   if (!DOWNLOAD_HOSTS.includes(host)) throw fail(`Refusing to download from ${host}`);
   const res = await fetchImpl(url, { headers: { "user-agent": "console-server-manager" }, redirect: "follow" }).catch((e) => {
@@ -104,6 +104,25 @@ async function download(fetchImpl, url, dest, log) {
   await rename(tmp, dest);
   log(`Downloaded ${(size / 1048576).toFixed(1)} MB`);
   return dest;
+}
+
+
+// Finds Java `need` or installs it with sudo. Shared by the setup and the version switcher.
+export async function ensureJava(need, env, ctx) {
+  let java = await findJava(env.run, need);
+  if (!java) {
+    ctx.log(`This version needs Java ${need}, which isn't installed. Installing it (needs sudo)…`);
+    const pm = await detectPm(env.run);
+    if (!pm) throw fail(`Install Java ${need} yourself, then try again.`);
+    const pkg = pm === "apt-get" ? `openjdk-${need}-jre-headless` : `java-${need}-openjdk-headless`;
+    if (pm === "apt-get") await ctx.exec("sudo", ["-n", "apt-get", "update", "-qq"], { allowFail: true });
+    await ctx.exec("sudo", ["-n", pm, "install", "-y", pkg]).catch(() => {
+      throw fail(`Couldn't install ${pkg}. Console needs passwordless sudo for this (opc has it on Oracle). You can also run: sudo ${pm} install -y ${pkg}`);
+    });
+    java = await findJava(env.run, need);
+    if (!java) throw fail(`Java ${need} still isn't available after installing. Check the log above.`);
+  }
+  return java;
 }
 
 export default {
@@ -143,19 +162,7 @@ export default {
 
     const dl = await resolveDownload(env.fetch, c.flavor, c.version);
     const need = dl.java ?? javaNeededFor(c.version);
-    let java = await findJava(env.run, need);
-    if (!java) {
-      ctx.log(`This version needs Java ${need}, which isn't installed. Installing it (needs sudo)…`);
-      const pm = await detectPm(env.run);
-      if (!pm) throw fail(`Install Java ${need} yourself, then try again.`);
-      const pkg = pm === "apt-get" ? `openjdk-${need}-jre-headless` : `java-${need}-openjdk-headless`;
-      if (pm === "apt-get") await ctx.exec("sudo", ["-n", "apt-get", "update", "-qq"], { allowFail: true });
-      await ctx.exec("sudo", ["-n", pm, "install", "-y", pkg]).catch(() => {
-        throw fail(`Couldn't install ${pkg}. Console needs passwordless sudo for this (opc has it on Oracle). You can also run: sudo ${pm} install -y ${pkg}`);
-      });
-      java = await findJava(env.run, need);
-      if (!java) throw fail(`Java ${need} still isn't available after installing. Check the log above.`);
-    }
+    const java = await ensureJava(need, env, ctx);
     ctx.log(`Using Java ${java.major} (${java.bin})`);
 
     await download(env.fetch, dl.url, path.join(dir, "server.jar"), ctx.log);

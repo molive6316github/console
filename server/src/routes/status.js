@@ -6,7 +6,7 @@ import { McError } from "../mc/props.js";
 const TTL = 10_000;
 const DOMAIN = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
 
-export function statusRoutes(app, { db, need, allow, mc, safeMode }) {
+export function statusRoutes(app, { db, need, allow, mc, startup, safeMode }) {
   const cfg = () => {
     try { return { enabled: false, names: false, ...JSON.parse(getSetting(db, "public_status", "{}")) }; } catch { return { enabled: false, names: false }; }
   };
@@ -21,6 +21,15 @@ export function statusRoutes(app, { db, need, allow, mc, safeMode }) {
 
   // Live status for signed-in people who can see the console.
   app.get("/api/servers/:id/mc/status", { preHandler: [allow("console"), scoped] }, wrap(async (req) => mc.liveStatus(req.srv)));
+
+  // Memory, Java flags, crash auto-restart and daily restart. Applies on the next start.
+  app.get("/api/servers/:id/mc/startup", { preHandler: [allow("startup"), scoped] }, wrap(async (req) => startup.view(req.srv)));
+  app.put("/api/servers/:id/mc/startup", { preHandler: [allow("startup"), scoped] }, wrap(async (req) => {
+    if (safeMode) throw new McError("Safe mode is on, so changes are blocked", 403);
+    const out = startup.update(req.srv, req.body ?? {});
+    audit(db, { username: req.user.username, serverId: req.srv.id, action: "mc-startup", ok: true, detail: `${out.memoryMb} MB, ${out.preset}` });
+    return out;
+  }));
 
   // The public page: no sign-in, opt-in, and only these few facts.
   let cache = { at: 0, body: null };

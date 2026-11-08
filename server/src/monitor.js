@@ -16,7 +16,7 @@ const ago = (ms) => {
 };
 
 // Checks every server on an interval, keeps the history, and alerts when something that should be up goes down.
-export function createMonitor({ db, notifier, getStatus, now = () => Date.now(), sampler = createSampler() }) {
+export function createMonitor({ db, notifier, getStatus, now = () => Date.now(), sampler = createSampler(), onCrash = null }) {
   const getState = db.prepare("SELECT * FROM server_state WHERE server_id = ?");
   const saveState = db.prepare(
     `INSERT INTO server_state (server_id, status, since, expected, fails, alerted) VALUES (?, ?, ?, ?, ?, ?)
@@ -49,8 +49,15 @@ export function createMonitor({ db, notifier, getStatus, now = () => Date.now(),
     } else if (status === "down") {
       fails += 1;
       if (expected === "up" && fails >= CONFIRM_FAILS && !alerted) {
-        messages.push(`🔴 ${server.name} is DOWN. Nobody stopped it from Console.`);
-        alerted = 1;
+        let tried = null;
+        if (onCrash) tried = await onCrash(server).catch(() => null);
+        if (tried?.restarted) {
+          messages.push(`🟠 ${server.name} crashed. Console restarted it automatically (attempt ${tried.attempt} of 3 in 30 min).`);
+          fails = 0; // give it a fresh chance to come up before judging it down again
+        } else {
+          messages.push(`🔴 ${server.name} is DOWN. Nobody stopped it from Console.${tried?.gaveUp ? " Auto-restart gave up after 3 tries in 30 minutes." : ""}`);
+          alerted = 1;
+        }
       }
     } else {
       since = prev.since; // "unknown" (a failed check, not a verdict) doesn't change anything
