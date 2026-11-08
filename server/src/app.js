@@ -12,6 +12,9 @@ import { serverRoutes } from "./routes/servers.js";
 import { adminRoutes } from "./routes/admin.js";
 import { discoverRoutes } from "./routes/discover.js";
 import { setupRoutes } from "./routes/setup.js";
+import { terminalRoutes } from "./routes/terminal.js";
+import { linuxRoutes } from "./routes/linux.js";
+import { getSetting } from "./db.js";
 import {
   verifyPassword,
   createSession,
@@ -63,9 +66,14 @@ export function buildApp({
     reply.header("X-Content-Type-Options", "nosniff");
     reply.header("X-Frame-Options", "DENY");
     reply.header("Referrer-Policy", "no-referrer");
+    // The terminal page is separate because xterm.js sets inline styles; the main app keeps the strict policy.
+    const termPage = req.url.split("?")[0] === "/terminal.html";
+    const style = termPage ? "style-src 'self' 'unsafe-inline'" : "style-src 'self'";
+    const host = String(req.headers.host ?? "").replace(/[^A-Za-z0-9.:\[\]-]/g, "");
+    const connect = termPage && host ? `connect-src 'self' ws://${host} wss://${host}` : "connect-src 'self'";
     reply.header(
       "Content-Security-Policy",
-      "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+      `default-src 'self'; img-src 'self' data:; ${style}; script-src 'self'; ${connect}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`
     );
     if (secureCookies) reply.header("Strict-Transport-Security", "max-age=31536000");
     if (req.url.startsWith("/api/")) reply.header("Cache-Control", "no-store");
@@ -133,6 +141,8 @@ export function buildApp({
     safeMode,
     version,
     bootId,
+    // Opt-in advanced tools: only admins are told they exist, and only when switched on.
+    features: req.user.role === "admin" && !safeMode ? { terminal: services.terminal.enabled(), linuxUsers: getSetting(db, "linux_users_enabled", "0") === "1" } : { terminal: false, linuxUsers: false },
   }));
 
   // Any signed-in user can change their own password.
@@ -182,11 +192,13 @@ export function buildApp({
   });
 
   // ---- servers, schedules, users, settings, host, audit ---------------------
-  const ctx = { app, db, need, runtime: services.runtime, notifier: services.notifier, scheduler: services.scheduler, safeMode };
+  const ctx = { app, db, need, runtime: services.runtime, notifier: services.notifier, scheduler: services.scheduler, terminal: services.terminal, safeMode };
   serverRoutes(app, ctx);
   adminRoutes(app, ctx);
   discoverRoutes(app, { ...ctx, discover: services.discover });
   setupRoutes(app, { ...ctx, setups: services.setups, jobs: services.jobs });
+  terminalRoutes(app, { ...ctx, terminal: services.terminal });
+  linuxRoutes(app, { ...ctx, linux: services.linux, featureOn: () => getSetting(db, "linux_users_enabled", "0") === "1" });
 
   // Restart Console (admin). Under systemd it comes straight back; elsewhere it just says so.
   app.post("/api/restart", { preHandler: need("admin") }, async (req) => {

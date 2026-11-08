@@ -252,3 +252,12 @@ a.card.pick:hover { border-color: var(--accent); }
 button.linklike { background: none; border: 0; color: var(--accent); padding: 0; text-align: left; width: fit-content; }
 select.levelpick { padding: 4px 8px; font-size: 13px; }
 .field.check { flex-direction: row; flex-wrap: wrap; align-items: center; }
+
+/* terminal page */
+body.termpage { display: flex; flex-direction: column; height: 100vh; margin: 0; }
+.termbar { display: flex; gap: 14px; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.termbar #state { color: var(--muted); flex: 1; }
+#term { flex: 1; min-height: 0; padding: 8px; background: #0e1116; }
+.linuxrow code { font-size: 12px; }
+.warn { border-color: var(--unknown); }
+.notice { margin-bottom: 12px; }

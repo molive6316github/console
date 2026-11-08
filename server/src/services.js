@@ -9,9 +9,11 @@ import os from "node:os";
 import { createJobs } from "./jobs.js";
 import { createSetups } from "./setups/index.js";
 import { getServer } from "./db.js";
+import { createTerminal } from "./terminal.js";
+import { createLinuxUsers } from "./linuxusers.js";
 
 // Wires the long-lived pieces together. Nothing runs on a timer until start() is called.
-export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverOptions = {}, setupOptions = {} } = {}) {
+export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverOptions = {}, setupOptions = {}, terminalOptions = {}, linuxOptions = {} } = {}) {
   const dir = dataDir ?? path.resolve("data");
   const runtime = createRuntime({ db, dataDir: dir });
   const extraRoots = (process.env.CONSOLE_SCAN_DIRS ?? "").split(":").filter((d) => d.startsWith("/"));
@@ -26,6 +28,8 @@ export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverO
   const monitor = createMonitor({ db, notifier, getStatus: (s) => runtime.status(s), now, sampler });
   const scheduler = createScheduler({ db, runtime, now });
   const jobs = createJobs();
+  const terminal = createTerminal({ db, ...terminalOptions });
+  const linux = createLinuxUsers({ selfUser: setupOptions.user ?? os.userInfo().username, ...linuxOptions });
   const setups = createSetups({
     db,
     jobs,
@@ -49,11 +53,14 @@ export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverO
     scheduler,
     jobs,
     setups,
+    terminal,
+    linux,
     start({ monitorSec = 60 } = {}) {
       scheduler.start();
       if (monitorSec > 0) monitor.start(monitorSec * 1000);
     },
     stop() {
+      terminal.closeAll("Console is shutting down");
       scheduler.stop();
       monitor.stop();
     },

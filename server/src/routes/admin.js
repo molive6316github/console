@@ -12,7 +12,7 @@ import { visibleServers } from "../access.js";
 
 const HOUR = 3_600_000;
 
-export function adminRoutes(app, { db, need, runtime, notifier, scheduler, safeMode }) {
+export function adminRoutes(app, { db, need, runtime, notifier, scheduler, safeMode, terminal }) {
   // ---- users -----------------------------------------------------------------
   app.get("/api/users", { preHandler: need("admin") }, async () => listUsers(db));
 
@@ -43,6 +43,8 @@ export function adminRoutes(app, { db, need, runtime, notifier, scheduler, safeM
     return {
       alertWebhook: maskWebhook(hook),
       alertsConfigured: Boolean(hook),
+      terminalEnabled: getSetting(db, "terminal_enabled", "0") === "1",
+      linuxUsersEnabled: getSetting(db, "linux_users_enabled", "0") === "1",
       githubToken: getSetting(db, "github_token", "") ? "••••" + String(getSetting(db, "github_token")).slice(-4) : "",
       timezone: defaultTimezone(db),
       backupKeep: Math.min(Math.max(parseInt(getSetting(db, "backup_keep", "7"), 10) || 7, 1), 50),
@@ -59,6 +61,14 @@ export function adminRoutes(app, { db, need, runtime, notifier, scheduler, safeM
       const bad = url && validWebhook(url);
       if (bad) return reply.code(400).send({ error: bad });
       setSetting(db, "alert_webhook", url);
+    }
+    for (const [key, setting] of [["terminalEnabled", "terminal_enabled"], ["linuxUsersEnabled", "linux_users_enabled"]]) {
+      if (b[key] === undefined) continue;
+      if (typeof b[key] !== "boolean") return reply.code(400).send({ error: `${key} must be true or false` });
+      if (b[key] && safeMode) return reply.code(403).send({ error: "Safe mode is on, so this can't be turned on" });
+      setSetting(db, setting, b[key] ? "1" : "0");
+      audit(db, { username: req.user.username, action: `${setting}_${b[key] ? "on" : "off"}`, ok: true });
+      if (key === "terminalEnabled" && !b[key]) terminal.closeAll("terminal was turned off");
     }
     if (b.githubToken !== undefined) {
       const t = typeof b.githubToken === "string" ? b.githubToken.trim() : null;

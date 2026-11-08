@@ -99,9 +99,9 @@ Everyone can change their own password (**Account**, 10+ characters). Forgot the
 
 **Discover** (admin) looks at the machine Console runs on. Each item has **Add to Console**, which opens the add-server form filled in.
 
-- **tmux sessions** with their folder and the command they were started with. tmux sessions belong to the Linux user that started them: Console runs as `console`, so it can't see or control sessions started as `opc` (it lists that those exist). To manage one, stop it and add it in Console so it runs as `console`.
-- **Docker containers and images**, with which images are unused. Needs `sudo usermod -aG docker console`.
-- **systemd services**: ones you installed (`/etc/systemd/system`), plus system ones on request. Added as `host: "local"`. Controlling a system service as `console` needs a sudoers rule; the error message shows the exact line.
+- **tmux sessions** with their folder and the command they were started with. tmux sessions belong to the Linux user that started them. When Console runs as the same user (the default on Oracle: `opc`), it sees them all; if it runs as a different user it lists that other users' sessions exist but can't control them.
+- **Docker containers and images**, with which images are unused. Needs the Console user in the `docker` group (`sudo usermod -aG docker opc`, then Settings → Restart Console).
+- **systemd services**: ones you installed (`/etc/systemd/system`), plus system ones on request. Added as `host: "local"`. Controlling a system service as a non-root user needs a sudoers rule; the error message shows the exact line.
 - **Running processes** (read-only) to spot things started some other way.
 - **Folders** directly inside `/srv`, `/opt` and each `/home/<user>`, with sizes and what they look like (Minecraft, Node, Docker Compose…). Add more places with `CONSOLE_SCAN_DIRS=/mnt/games:/data` (colon-separated).
 
@@ -110,7 +110,42 @@ Everyone can change their own password (**Account**, 10+ characters). Forgot the
 - **Kill a tmux session / remove a container or image / prune** stopped containers and untagged images. Docker volumes are never touched. Anything that is a Console server must be removed from Console first (or use its Stop button).
 - **Delete a folder** only works on folders that the scan lists. You must type its exact name, and it offers to save a compressed copy first (on by default; if the copy fails, nothing is deleted). It refuses Console itself, its database, any folder a Console server uses, a folder something is still running from, symlinks, and top-level system folders.
 - **Console's own leftovers**: backups of servers you removed and the saved copies from folder deletions.
-- Everything here is in the audit log, and is disabled in safe mode (scanning still works). Deleting as the `console` user can only remove what that user owns; if some files belong to another user, Console says so instead of pretending it worked.
+- Everything here is in the audit log, and is disabled in safe mode (scanning still works). Deleting can only remove what that user owns; if some files belong to another user, Console says so instead of pretending it worked.
+
+## Create: one-click setups
+
+**Create** (admin) is the beginner-friendly front door. Pick a card, fill in a few boxes, watch the progress, done. Everything it makes becomes a normal Console server you can start, stop, watch, back up and schedule.
+
+- **Minecraft server**: Paper, Vanilla, Purpur or Fabric, with a version picker (lists come from the vendors' own APIs). Console downloads the jar, installs the right Java if it's missing (needs passwordless sudo, which `opc` has on Oracle), writes `eula.txt` only after you tick the EULA box, opens the firewall port if you ask, and starts it in tmux with a `stop` command so shutdowns are clean. You still need an Oracle VCN ingress rule for the port.
+- **App or bot from GitHub** (Node.js or Python): paste `owner/repo` or a link. Console clones it, installs dependencies (`npm install`, or a `.venv` + `pip`), saves your settings/secrets to a private `.env` (mode 600, never shown again), works out the start command (or you give one), and runs it in tmux, optionally restarting 5 seconds after any crash. **Update from GitHub** is a button on the server's Settings tab.
+- **Website**: a domain with automatic HTTPS through Caddy, from a blank starter page or a GitHub repo (with an optional `npm run build` and a folder to publish). Point the domain's A record at the server; Console writes a small file in `/etc/caddy/sites`, validates the config, and reloads Caddy only if it's valid. Needs Caddy, which the installer sets up when you give it a domain (re-run the installer once to prepare the folders).
+- **Docker app**: Uptime Kuma, Portainer, Vaultwarden, Nginx Proxy Manager, File Browser, or any image you name (ports and environment variables included). Data lives in named Docker volumes. Add your own favorites in `server/src/setups/dockerapps.js`.
+- **Find what's already here** and **Add one by hand** are on the same page.
+
+**Private repositories:** Settings → GitHub access. Use a fine-grained token with read-only "Contents" access to just the repos you want. It is stored on this machine, masked afterwards, sent to GitHub only through git's environment (never the command line or `.git/config`), and scrubbed from logs.
+
+Everything Create does is audited and disabled in safe mode. Clone targets are limited to github.com, gitlab.com and codeberg.org over https. Apps go in `~/servers/<id>` (change with `CONSOLE_APPS_DIR`).
+
+## Beginner to advanced
+
+The selector at the top right (also under Settings) sets how much you see, per browser:
+
+- **Simple**: Servers, Create, Settings, Account. Forms ask only the essentials.
+- **Standard**: adds Host, Discover, Schedules, Users and Updates, and the "More options" in forms.
+- **Advanced**: adds the Audit log, raw ID fields, and (once switched on) the Terminal and Linux users.
+
+It only changes what's shown. It never changes what anyone is allowed to do; roles and per-server access still decide that.
+
+## Web terminal and Linux users (advanced, off by default)
+
+Both are switched on by an admin under **Settings → Advanced tools**, are admin-only, are blocked by safe mode, and are written to the audit log.
+
+- **Terminal**: a real shell in your browser (opens in its own tab, `/terminal.html`), running as the same Linux user as Console. Sessions are logged (who, from where, for how long); what you type is not, because that would capture passwords. Secrets Console was started with (`CONSOLE_*`, `CF_*`) are removed from the shell's environment. It checks the browser's origin, allows 3 sessions at once, closes after 30 idle minutes, and ends immediately if you sign out, are demoted, or the switch is turned off.
+- **Linux users**: list the real accounts, create one (SSH-key login, no password), add or remove SSH keys (only genuine one-line public keys are accepted; `command=` style options are refused), grant or remove sudo, delete a user (type the name to confirm; the home folder is only deleted if you tick the box). It uses `sudo -n` with each value passed separately, never through a shell string. It refuses to touch system accounts and the account Console itself runs as.
+
+## Running as `opc` (or any login user)
+
+The installer runs Console as **the user who ran it with sudo** (so `opc` on Oracle), because that's the account your tmux sessions, Docker access and files already belong to. Override with `--user NAME`; with nobody to pick, it creates a locked-down `console` user instead. The choice is remembered (`CONSOLE_RUN_USER` in `/etc/console.env`). A login user's service doesn't set `NoNewPrivileges`, since Console needs `sudo` for Java, firewall, Caddy and Linux users.
 
 ## Alerts, schedules, metrics
 
@@ -175,17 +210,17 @@ sudo systemctl reload caddy
 2. On the instance itself (Ubuntu images ship with strict iptables rules): run `sudo iptables -L INPUT --line-numbers`, then insert ACCEPT rules for 80 and 443 *above* the REJECT line, e.g. `sudo iptables -I INPUT 5 -p tcp --dport 80 -j ACCEPT`, same for 443, then `sudo netfilter-persistent save`.
 
 Notes:
-- Game servers started by the `tmux` driver run as the `console` user. Restarting the dashboard does not kill them (`KillMode=process`). Attach with `sudo -u console tmux attach -t uhc`.
+- Game servers started by the `tmux` driver run as the same user as Console (`opc` by default; `console` if you chose that). Restarting the dashboard does not kill them (`KillMode=process`). Attach with `tmux attach -t uhc` as that user.
 - For the `docker` driver, add the user to the docker group: `sudo usermod -aG docker console`. Know that this is root-equivalent on that machine.
 - Console controls real processes, so treat the admin password like an SSH key. Use a long one.
 - **Updating:** run the install command again, or sign in as admin, click **Updates**, then **Update now**. It fast-forwards from GitHub, runs `npm install` and `npm run build`, and restarts itself (the page reloads when it's back). If the install or build fails it rolls back to the previous version. It refuses to run if tracked files have local edits. This relies on `Restart=on-failure` in the systemd unit: after an update the process exits with code 75 and systemd starts it again.
-- The `console` user must be able to `git fetch` from the repo. With the public repo that just works. If the Updates panel ever says it can't reach the repo, test with `sudo -u console git -C /opt/console fetch origin main`.
+- The user Console runs as must be able to `git fetch` from the repo. With the public repo that just works. If the Updates panel ever says it can't reach the repo, test with `sudo -u opc git -C /opt/console fetch origin main` (use your Console user).
 - Manual update, if you ever need it: `cd /opt/console && sudo -u console git pull --ff-only && sudo -u console npm install && sudo -u console npm run build && sudo systemctl restart console`.
 
 ## Security notes
 
 - **An admin account can run commands on this machine.** Adding a `tmux` server lets you set its start command, the command box types into a shell-capable process, and the file editor can change a start script. That is the point of the tool, but it means an admin password is as sensitive as an SSH key. Operators can send commands to servers they can access but can't change what runs.
-- **Safe mode** (`CONSOLE_SAFE_MODE=1`) turns off adding/editing servers in the UI, the file editor, and sending commands (including scheduled commands). Deleting from Discover is disabled too. Servers in `servers.json` and start/stop/restart still work. Use it if you'd rather define servers only by editing the file.
+- **Safe mode** (`CONSOLE_SAFE_MODE=1`) turns off adding/editing servers in the UI, the file editor, Create, the web terminal, Linux user management, and sending commands (including scheduled commands). Deleting from Discover is disabled too. Servers in `servers.json` and start/stop/restart still work. Use it if you'd rather define servers only by editing the file.
 - Binds to `127.0.0.1` by default; the section above is the supported way to expose it. If you set `HOST=0.0.0.0` anyway, it prints a warning unless `CONSOLE_SECURE_COOKIES=1`.
 - Only set `CONSOLE_TRUST_PROXY=1` when a proxy you control sits in front, otherwise clients can fake their IP and dodge the login rate limit.
 - Responses carry CSP, `X-Frame-Options: DENY`, `nosniff`, and HSTS (when secure cookies are on).
@@ -209,12 +244,16 @@ Notes:
 | `CONSOLE_LOG` | off (`1` for request logs) |
 | `CONSOLE_UPDATE_BRANCH` | `main` |
 | `CONSOLE_SAFE_MODE` | off (`1` disables UI server editing, file editor, commands) |
+| `CONSOLE_APPS_DIR` | `~/servers` (where Create puts Minecraft servers, bots and apps) |
+| `CONSOLE_PUBLIC_IP` | set by the installer (used in "connect to…" hints) |
+| `CONSOLE_RUN_USER` | set by the installer (the Linux user Console runs as) |
+| `CONSOLE_CADDY_SITES` / `CONSOLE_SITES_ROOT` | `/etc/caddy/sites` / `/srv/sites` (Website setup) |
 | `CONSOLE_SCAN_DIRS` | none (colon-separated extra folders for Discover to list) |
 | `CONSOLE_MONITOR_SEC` | `60` (how often to check servers / sample metrics / alert; `0` = off) |
 
 ## Roadmap
 
-- Next: Dockerfile, per-server CPU/RAM (docker stats), email alerts, restoring a backup from the UI, two-factor login
+- Next: two-factor login, restoring a backup from the UI, email alerts, per-server CPU/RAM (docker stats), more one-click apps (Mumble, Valheim, Minecraft modpacks)
 - **v0.3 open source:** screenshots, license, contribution guide
 
 ## License

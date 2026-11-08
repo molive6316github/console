@@ -14,6 +14,16 @@ export async function settingsView(box, { me }) {
   const msg = h("div", { class: "error" });
   const ghToken = h("input", { type: "password", autocomplete: "off", spellcheck: "false", placeholder: s.githubToken ? `Saved (${s.githubToken}). Paste a new one to replace.` : "ghp_… or github_pat_…" });
 
+  function toggle(label, help, on, key) {
+    const box = h("input", { type: "checkbox", checked: on, onchange: async (e) => {
+      const want = e.target.checked;
+      if (want && !confirm(`Turn on: ${label}?\n\n${help}`)) return void (e.target.checked = false);
+      if (!(await save({ [key]: want }, want ? `${label} is on` : `${label} is off`))) e.target.checked = !want;
+      else window.dispatchEvent(new Event("console:features")); // refetch who-can-see-what and redraw the menu
+    } });
+    return h("label", { class: "check" }, box, h("span", {}, h("b", {}, label), ` — ${help}`));
+  }
+
   async function save(body, ok) {
     msg.textContent = "";
     try {
@@ -79,6 +89,20 @@ export async function settingsView(box, { me }) {
       h("h2", {}, "How much to show"),
       h("p", { class: "muted" }, "This only changes what you see in this browser. It never changes what anyone is allowed to do."),
       h("div", { class: "stack wide" }, ...LEVELS.map((l) => h("label", { class: "check" }, h("input", { type: "radio", name: "level", checked: getLevel() === l.id, onchange: () => setLevel(l.id) }), h("span", {}, h("b", {}, l.label), ` — ${l.blurb}`))))
+    ),
+    h(
+      "div",
+      { class: "panel warn" },
+      h("h2", {}, "Advanced tools (off by default)"),
+      h("p", { class: "muted" }, "Powerful, and risky if an admin account is ever stolen. Both are admin-only, are disabled by safe mode, and are recorded in the Audit log. Turn on only what you use."),
+      me.safeMode
+        ? h("p", { class: "muted" }, "Safe mode is on, so these can't be turned on.")
+        : h(
+            "div",
+            { class: "stack wide" },
+            toggle("Web terminal", "A real shell in your browser, running as the same Linux user as Console. Opens in its own tab (Advanced level: nav > Terminal). Sessions are logged (who, when, how long); what you type isn't.", s.terminalEnabled, "terminalEnabled"),
+            toggle("Manage Linux users", "Create and delete accounts on this machine, add SSH keys, grant sudo. Needs passwordless sudo for Console's user (opc has it on Oracle).", s.linuxUsersEnabled, "linuxUsersEnabled")
+          )
     ),
     h(
       "div",

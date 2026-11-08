@@ -11,6 +11,7 @@ import { accountView } from "./views/account.js";
 import { updatesView } from "./views/updates.js";
 import { discoverView, newServerView } from "./views/discover.js";
 import { createView } from "./views/create.js";
+import { linuxView } from "./views/linux.js";
 import { LEVELS, atLeast, getLevel, setLevel } from "./level.js";
 
 const app = document.getElementById("app");
@@ -65,7 +66,11 @@ function navItems() {
   if (isAdmin()) {
     if (atLeast("standard")) items.push(["#/discover", "Discover", "discover"], ["#/schedules", "Schedules", "schedules"], ["#/users", "Users", "users"]);
     items.push(["#/settings", "Settings", "settings"]);
-    if (atLeast("advanced")) items.push(["#/audit", "Audit", "audit"]);
+    if (atLeast("advanced")) {
+      items.push(["#/audit", "Audit", "audit"]);
+      if (me.features?.linuxUsers) items.push(["#/linux", "Linux users", "linux"]);
+      if (me.features?.terminal) items.push(["/terminal.html", "Terminal ↗", "terminal"]);
+    }
     if (atLeast("standard") || (updateInfo?.ok && updateInfo.behind > 0)) items.push(["#/updates", updateInfo?.ok && updateInfo.behind > 0 ? `Updates (${updateInfo.behind})` : "Updates", "updates"]);
   }
   items.push(["#/account", "Account", "account"]);
@@ -88,6 +93,7 @@ const VIEWS = {
   users: { render: usersView, admin: true },
   settings: { render: settingsView, admin: true },
   audit: { render: auditView, admin: true },
+  linux: { render: linuxView, admin: true, allowed: () => me.features?.linuxUsers },
   updates: { render: (box, ctx) => updatesView(box, { ...ctx, onInfo: (i) => ((updateInfo = i), drawNav()) }), admin: true },
   account: { render: accountView },
 };
@@ -96,7 +102,7 @@ function drawNav() {
   if (!navEl) return;
   const route = parseRoute();
   const current = route.name === "server" ? "servers" : route.name === "new" ? (atLeast("standard") ? "discover" : "create") : route.name;
-  navEl.replaceChildren(...navItems().map(([href, label, key]) => h("a", { href, class: key === current ? "on" : "" }, label)));
+  navEl.replaceChildren(...navItems().map(([href, label, key]) => h("a", { href, class: key === current ? "on" : "", ...(key === "terminal" ? { target: "_blank", rel: "noopener" } : {}) }, label)));
 }
 
 function render() {
@@ -160,6 +166,11 @@ window.addEventListener("hashchange", () => {
   render();
 });
 window.addEventListener("console:level", () => me && (renderShell(), render()));
+window.addEventListener("console:features", async () => {
+  if (!me) return;
+  try { me = await api("/me"); } catch { return; }
+  drawNav();
+});
 window.addEventListener("console:signed-out", () => me && renderLogin("Session expired, sign in again"));
 
 async function boot() {
