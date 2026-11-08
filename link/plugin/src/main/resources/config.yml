@@ -1,0 +1,8 @@
+# Console Link: where to send this server's status.
+# 1. Make a server on your dashboard/hub and copy its key here.
+# 2. Restart the server.
+hub-url: ""
+key: ""
+interval-seconds: 10
+# Turn off to show only the player COUNT, never names.
+share-player-names: true

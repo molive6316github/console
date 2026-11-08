@@ -1,0 +1,12 @@
+name: ConsoleLink
+version: ${project.version}
+main: productions.mxt.link.LinkPlugin
+api-version: "1.21"
+description: Pushes server status to a Console Link dashboard and runs a few safe dashboard commands.
+commands:
+  consolelink:
+    description: Show Console Link status
+    permission: consolelink.admin
+permissions:
+  consolelink.admin:
+    default: op
