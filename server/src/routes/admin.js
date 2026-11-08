@@ -4,7 +4,8 @@ import { destroyUserSessions } from "../auth.js";
 import { listUsers, createUser, updateUser, deleteUser, UserError } from "../users.js";
 import { validWebhook, maskWebhook } from "../notify.js";
 import { validTimezone, parseCron } from "../cron.js";
-import { SCHEDULE_ACTIONS, defaultTimezone } from "../scheduler.js";
+import { SCHEDULE_ACTIONS, MC_ACTIONS, defaultTimezone } from "../scheduler.js";
+import { mcRoot } from "../mc/index.js";
 import { getDriver } from "../drivers/index.js";
 import { filesRootOf } from "../runtime.js";
 import { hostHistory } from "../monitor.js";
@@ -129,6 +130,9 @@ export function adminRoutes(app, { db, need, runtime, notifier, scheduler, safeM
       if (safeMode) return "Safe mode is on: commands can't be scheduled";
       if (!driver.send) return "This kind of server can't take commands";
       if (typeof b.arg !== "string" || !b.arg.trim() || b.arg.length > 1000 || /[\r\n\0]/.test(b.arg)) return "Type the command (one line)";
+    } else if (MC_ACTIONS.includes(b.action)) {
+      if (safeMode) return "Safe mode is on: this can't be scheduled";
+      if (!mcRoot(server)) return "That server isn't a Minecraft server";
     } else if (b.action === "backup") {
       if (!filesRootOf(server)) return "This server has no local files folder to back up";
     } else if (driver.readOnly) {

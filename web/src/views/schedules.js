@@ -8,7 +8,7 @@ const PRESETS = [
   ["0 5 1 * *", "1st of the month at 5:00"],
 ];
 const describe = (cron) => PRESETS.find(([c]) => c === cron)?.[1] ?? cron;
-const LABEL = { start: "Start", stop: "Stop", restart: "Restart", backup: "Back up", command: "Send command" };
+const LABEL = { start: "Start", stop: "Stop", restart: "Restart", backup: "Back up", command: "Send command", "mc-backup": "Safe world backup", "mc-github-config": "Back up configs to GitHub", "mc-github-world": "Back up world to GitHub" };
 
 export function schedulesView(box, { me }) {
   const life = lifecycle();
@@ -80,6 +80,7 @@ export function schedulesView(box, { me }) {
     if (!s.caps.readOnly) out.push("restart", "start", "stop");
     if (s.caps.files) out.push("backup");
     if (s.caps.send && !me.safeMode) out.push("command");
+    if (s.mc && !me.safeMode) out.push("mc-backup", "mc-github-config", "mc-github-world");
     return out;
   }
 

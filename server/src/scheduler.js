@@ -2,7 +2,8 @@ import { listServers, getSetting, audit } from "./db.js";
 import { parseCron, matches, partsIn, validTimezone, nextRun } from "./cron.js";
 import { ActionError } from "./runtime.js";
 
-export const SCHEDULE_ACTIONS = ["start", "stop", "restart", "backup", "command"];
+export const SCHEDULE_ACTIONS = ["start", "stop", "restart", "backup", "command", "mc-backup", "mc-github-config", "mc-github-world"]
+export const MC_ACTIONS = ["mc-backup", "mc-github-config", "mc-github-world"];
 
 export function defaultTimezone(db) {
   const saved = getSetting(db, "timezone");
@@ -12,7 +13,7 @@ export function defaultTimezone(db) {
 
 // Runs due schedules. Checked every 20s; each schedule fires at most once per minute.
 // If Console was down at the scheduled minute, that run is skipped (it doesn't catch up).
-export function createScheduler({ db, runtime, now = () => Date.now() }) {
+export function createScheduler({ db, runtime, now = () => Date.now(), runMc = null }) {
   async function tick(at = now()) {
     const minute = Math.floor(at / 60000);
     const tz = defaultTimezone(db);
@@ -45,7 +46,10 @@ export function createScheduler({ db, runtime, now = () => Date.now() }) {
       detail = "server no longer exists";
     } else {
       try {
-        await runtime.perform(server, row.action, actor, row.arg ?? undefined);
+        if (MC_ACTIONS.includes(row.action)) {
+          if (!runMc) throw new Error("Minecraft tools aren't available");
+          await runMc(server, row.action, actor);
+        } else await runtime.perform(server, row.action, actor, row.arg ?? undefined);
       } catch (e) {
         status = e instanceof ActionError && e.status === 409 ? "skipped" : "failed";
         detail = e.message;

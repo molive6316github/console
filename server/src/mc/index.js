@@ -5,6 +5,11 @@ import { filesRootOf } from "../runtime.js";
 import { McError, view, apply } from "./props.js";
 import { buildCommand, parseList } from "./players.js";
 import { createPlugins } from "./plugins.js";
+import { pauseSaves } from "./savehooks.js";
+import { restoreBackup, resetWorld } from "./worlds.js";
+import { pushConfig, pushWorld, repoOf } from "./github.js";
+import { tokenSecrets } from "../gitutil.js";
+import { BACKUP_NAME } from "../backups.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -33,7 +38,7 @@ async function readJson(file) {
   }
 }
 
-export function createMc({ runtime, listWaitMs = 900, fetchImpl = fetch, getToken, getMeta }) {
+export function createMc({ runtime, listWaitMs = 900, fetchImpl = fetch, getToken, getMeta, jobs, cfgGet = () => null, cfgSet = () => {}, dataDir = "/tmp/console-mc", saveWaitMs = 30_000 }) {
   const plugins = createPlugins({ fetchImpl, getToken, getMeta });
   const rootKind = (server) => {
     const root = mcRoot(server);
@@ -89,8 +94,112 @@ export function createMc({ runtime, listWaitMs = 900, fetchImpl = fetch, getToke
     return { ok: true, command: cmd };
   }
 
+  // ---- backups that don't corrupt a running world ----
+  const pauser = (server, root) => () => pauseSaves(server, root, { status: (x) => runtime.status(x), waitMs: saveWaitMs });
+  async function safeBackup(server, actor) {
+    const root = mcRoot(server);
+    if (!root) throw new McError("This isn't a Minecraft server", 404);
+    if (runtime.busy.has(server.id)) throw new McError("Another action is already running on this server", 409);
+    const resume = await pauser(server, root)();
+    try {
+      return await runtime.perform(server, "backup", actor);
+    } finally {
+      await resume?.();
+    }
+  }
+
+  const mustBeStopped = async (server) => {
+    if (runtime.busy.has(server.id)) throw new McError("Another action is already running on this server", 409);
+    if ((await runtime.status(server).catch(() => "unknown")) !== "down") throw new McError("Stop the server first. This can't be done while it's running.", 409);
+  };
+  const needConfirm = (server, confirm) => {
+    if (confirm !== server.id) throw new McError(`Type the server ID (${server.id}) to confirm`, 400);
+  };
+
+  async function restore(server, name, confirm) {
+    const root = mcRoot(server);
+    if (!root) throw new McError("This isn't a Minecraft server", 404);
+    needConfirm(server, confirm);
+    if (!BACKUP_NAME.test(String(name))) throw new McError("No such backup", 404);
+    const file = runtime.backups.pathFor(server.id, name);
+    if (!file) throw new McError("No such backup", 404);
+    await mustBeStopped(server);
+    runtime.busy.add(server.id);
+    try {
+      return await restoreBackup({ root, file });
+    } finally {
+      runtime.busy.delete(server.id);
+    }
+  }
+
+  async function reset(server, confirm) {
+    const root = mcRoot(server);
+    if (!root) throw new McError("This isn't a Minecraft server", 404);
+    needConfirm(server, confirm);
+    await mustBeStopped(server);
+    runtime.busy.add(server.id);
+    try {
+      return await resetWorld({ root });
+    } finally {
+      runtime.busy.delete(server.id);
+    }
+  }
+
+  // ---- GitHub sync ----
+  const cfgOf = (server) => ({ repo: "", keep: 5, ...(cfgGet(server.id) ?? {}) });
+  const gh = {
+    get: (server) => cfgOf(server),
+    set: (server, { repo, keep }) => {
+      const next = cfgOf(server);
+      if (repo !== undefined) {
+        if (repo !== "") repoOf(repo);
+        next.repo = String(repo).trim();
+      }
+      if (keep !== undefined) {
+        const k = Number(keep);
+        if (!Number.isInteger(k) || k < 1 || k > 50) throw new McError("Keep must be a whole number from 1 to 50");
+        next.keep = k;
+      }
+      cfgSet(server.id, next);
+      return next;
+    },
+    pushConfig: (server, actor) => {
+      const root = mcRoot(server);
+      if (!root) throw new McError("This isn't a Minecraft server", 404);
+      const cfg = cfgOf(server);
+      if (!cfg.repo) throw new McError("Set the backup repo first");
+      const token = getToken();
+      if (!token) throw new McError("Save a GitHub token in Settings first");
+      return jobs.start({ title: `Back up ${server.name} configs to GitHub`, actor, redact: tokenSecrets(token) }, (ctx) =>
+        pushConfig({ ctx, root, serverId: server.id, repoInput: cfg.repo, token, workDir: path.join(dataDir, "mc-git", server.id) }));
+    },
+    pushWorld: (server, actor) => {
+      const root = mcRoot(server);
+      if (!root) throw new McError("This isn't a Minecraft server", 404);
+      const cfg = cfgOf(server);
+      if (!cfg.repo) throw new McError("Set the backup repo first");
+      const token = getToken();
+      if (!token) throw new McError("Save a GitHub token in Settings first");
+      return jobs.start({ title: `Back up ${server.name} world to GitHub`, actor, redact: tokenSecrets(token) }, (ctx) =>
+        pushWorld({ ctx, root, serverId: server.id, repoInput: cfg.repo, token, keep: cfg.keep, fetchImpl, tmpDir: path.join(dataDir, "mc-tmp"), pause: pauser(server, root) }));
+    },
+  };
+
+  // Used by the scheduler: runs the same thing and waits for it to finish.
+  async function scheduled(server, action, actor) {
+    if (action === "mc-backup") return safeBackup(server, actor);
+    const job = action === "mc-github-config" ? gh.pushConfig(server, actor) : action === "mc-github-world" ? gh.pushWorld(server, actor) : null;
+    if (!job) throw new McError("Unknown action");
+    for (;;) {
+      const v = jobs.get(job.id);
+      if (v.status === "done") return v.result;
+      if (v.status === "failed") throw new McError(v.error ?? "failed");
+      await sleep(500);
+    }
+  }
+
   return {
-    getProps, setProps, players, act,
+    getProps, setProps, players, act, safeBackup, restore, reset, gh, scheduled,
     plugins: {
       kind: (server) => rootKind(server).kind,
       list: async (server) => { const { root, kind } = rootKind(server); return { kind, files: await plugins.list(root, kind) }; },

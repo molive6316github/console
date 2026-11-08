@@ -1,5 +1,6 @@
 import { h, api, toast, field } from "../ui.js";
 import { atLeast } from "../level.js";
+import { followJob } from "./create.js";
 
 const base = (s) => `/servers/${encodeURIComponent(s.id)}/mc`;
 
@@ -225,4 +226,120 @@ export async function pluginsTab(box, { server, me }) {
     ghOut
   );
   drawInstalled();
+}
+
+// ---- Worlds, safe backups, restore, GitHub sync ---------------------------------------
+export async function worldsTab(box, { server, life }) {
+  const base = `/servers/${encodeURIComponent(server.id)}/mc`;
+  const bk = `/servers/${encodeURIComponent(server.id)}/backups`;
+  const backupsBox = h("div", {});
+  const jobBox = h("div", {});
+  const stopped = server.status === "down";
+
+  const backupBtn = h("button", { class: "primary" }, "Back up now (safe)");
+  backupBtn.addEventListener("click", async () => {
+    backupBtn.disabled = true;
+    backupBtn.textContent = "Backing up…";
+    try {
+      await api(`${base}/backup`, { method: "POST" });
+      toast("Backup done");
+      await drawBackups();
+    } catch (e) {
+      toast(e.message, true);
+    } finally {
+      backupBtn.disabled = false;
+      backupBtn.textContent = "Back up now (safe)";
+    }
+  });
+
+  async function drawBackups() {
+    try {
+      const rows = await api(bk);
+      backupsBox.replaceChildren(
+        rows.length
+          ? h("table", {}, h("thead", {}, h("tr", {}, ["Created", "Size", ""].map((t) => h("th", {}, t)))),
+              h("tbody", {}, rows.map((b) => h("tr", {}, h("td", {}, new Date(b.created).toLocaleString()), h("td", {}, `${(b.size / 1048576).toFixed(1)} MB`),
+                h("td", { class: "right" }, h("button", { class: "danger", disabled: !stopped, title: stopped ? "" : "Stop the server first", onclick: () => restore(b.name) }, "Restore"))))))
+          : h("div", { class: "empty" }, "No backups yet.")
+      );
+    } catch (e) {
+      backupsBox.replaceChildren(h("div", { class: "empty" }, e.message));
+    }
+  }
+
+  async function restore(name) {
+    const typed = prompt(`Restore this backup? Everything in the server folder is swapped for what's in the backup. The current files are kept next to it, not deleted.\n\nType the server ID (${server.id}) to confirm:`);
+    if (typed === null) return;
+    try {
+      const r = await api(`${base}/restore`, { method: "POST", body: { name, confirm: typed.trim() } });
+      toast("Restored");
+      alert(`Done. Your previous files are kept at:\n${r.previousKeptAt}`);
+    } catch (e) {
+      toast(e.message, true);
+    }
+  }
+
+  const resetBtn = h("button", { class: "danger", disabled: !stopped, title: stopped ? "" : "Stop the server first" }, "Start a new world");
+  resetBtn.addEventListener("click", async () => {
+    const typed = prompt(`This moves the current world (overworld, nether, end) into old-worlds/ so the server generates a fresh one on next start. Nothing is deleted.\n\nType the server ID (${server.id}) to confirm:`);
+    if (typed === null) return;
+    try {
+      const r = await api(`${base}/reset-world`, { method: "POST", body: { confirm: typed.trim() } });
+      toast(`Moved to ${r.movedTo}`);
+    } catch (e) {
+      toast(e.message, true);
+    }
+  });
+
+  // GitHub
+  const repo = h("input", { placeholder: "MyTeam/server-backups", autocomplete: "off", spellcheck: "false" });
+  const keep = h("input", { type: "number", min: "1", max: "50", value: "5" });
+  const ghBox = h("div", { class: "stack" });
+  async function loadGh() {
+    try {
+      const c = await api(`${base}/github`);
+      repo.value = c.repo;
+      keep.value = c.keep;
+    } catch (e) {
+      toast(e.message, true);
+    }
+  }
+  async function saveGh() {
+    try {
+      await api(`${base}/github`, { method: "PUT", body: { repo: repo.value.trim(), keep: Number(keep.value) } });
+      toast("Saved");
+      return true;
+    } catch (e) {
+      toast(e.message, true);
+      return false;
+    }
+  }
+  async function push(kind) {
+    if (!(await saveGh())) return;
+    try {
+      const { jobId } = await api(`${base}/github/push-${kind}`, { method: "POST" });
+      jobBox.replaceChildren();
+      followJob(jobBox, jobId, { life });
+    } catch (e) {
+      toast(e.message, true);
+    }
+  }
+  ghBox.append(
+    field("Private GitHub repo to back up into", repo, "Make it private. Needs a token with write access to Contents (Settings → GitHub)."),
+    field("World backups to keep on GitHub", keep),
+    h("div", { class: "row" },
+      h("button", { onclick: () => saveGh() }, "Save"),
+      h("button", { class: "primary", onclick: () => push("config") }, "Back up configs now"),
+      h("button", { onclick: () => push("world") }, "Back up world now")),
+    h("p", { class: "muted" }, "Configs go to a branch named servers/" + server.id + " with passwords and tokens blanked (a best guess, so keep the repo private). Worlds are uploaded as release files, up to 2 GB each.")
+  );
+
+  box.append(
+    h("div", { class: "panel" }, h("h2", {}, "Safe backups"),
+      h("p", { class: "muted" }, "While the server runs, Console pauses saving, flushes the world to disk, copies it, then turns saving back on. Restore needs the server stopped."),
+      h("div", { class: "row" }, backupBtn), backupsBox),
+    h("div", { class: "panel" }, h("h2", {}, "New world"), h("p", { class: "muted" }, "Start over without losing the old one."), resetBtn),
+    h("div", { class: "panel" }, h("h2", {}, "GitHub backups"), ghBox, jobBox)
+  );
+  await Promise.all([drawBackups(), loadGh()]);
 }

@@ -138,6 +138,29 @@ The selector at the top right (also under Settings) sets how much you see, per b
 
 It only changes what's shown. It never changes what anyone is allowed to do; roles and per-server access still decide that.
 
+## Minecraft mode
+
+Install on a fresh box with the Minecraft flavour:
+
+```
+curl -fsSL https://raw.githubusercontent.com/molive6316github/console/main/install.sh | sudo bash -s -- --minecraft
+```
+
+(`--standard` switches back.) Console then opens in Simple level with a trimmed menu, and any server that has a `server.properties` gets Minecraft tabs automatically:
+
+- **Players**: who's online, whitelist / ops / bans, kick, ban, op, say, time, weather, gamemode (fixed command templates, nothing is passed through raw).
+- **Game settings**: a proper editor for `server.properties` (a `.console-bak` copy is kept; passwords are masked).
+- **Plugins / Mods**: list, disable, enable, delete; install from Modrinth (hash-checked) or from GitHub releases (a team org works: set the org in Settings, pick a repo, pick the jar). Downloads only come from fixed hosts.
+- **Worlds & backups**:
+  - *Safe backup*: on a running server Console runs `save-off`, `save-all flush`, copies, then `save-on` (always, even if the copy fails).
+  - *Restore*: server must be stopped and you type the server ID. The current folder is renamed `<folder>.before-restore-<time>`, never deleted. Archives with unsafe paths are refused.
+  - *New world*: moves the world folders into `old-worlds/<time>/`.
+  - *GitHub configs*: pushes `server.properties`, lists, and plugin/mod config files to branch `servers/<id>` of a private repo. Lines that look like passwords/tokens/API keys are blanked in the copy (a heuristic, so keep the repo private). Jars and worlds are never included.
+  - *GitHub worlds*: uploads the world as a release file (limit 2 GB) and prunes old ones past "keep".
+  - Schedules can run **Safe world backup**, **Back up configs to GitHub** and **Back up world to GitHub**.
+
+The GitHub token needs write access to *Contents* on the backup repo. Open TCP 25565 in your cloud firewall (Oracle: VCN security list) or nobody can join.
+
 ## Web terminal and Linux users (advanced, off by default)
 
 Both are switched on by an admin under **Settings → Advanced tools**, are admin-only, are blocked by safe mode, and are written to the audit log.
@@ -248,6 +271,7 @@ Notes:
 | `CONSOLE_SAFE_MODE` | off (`1` disables UI server editing, file editor, commands) |
 | `CONSOLE_APPS_DIR` | `~/servers` (where Create puts Minecraft servers, bots and apps) |
 | `CONSOLE_PUBLIC_IP` | set by the installer (used in "connect to…" hints) |
+| `CONSOLE_MODE` | `minecraft` or `standard` (set by the installer flags). |
 | `CONSOLE_RUN_USER` | set by the installer (the Linux user Console runs as) |
 | `CONSOLE_CADDY_SITES` / `CONSOLE_SITES_ROOT` | `/etc/caddy/sites` / `/srv/sites` (Website setup) |
 | `CONSOLE_SCAN_DIRS` | none (colon-separated extra folders for Discover to list) |

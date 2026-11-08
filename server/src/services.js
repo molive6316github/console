@@ -8,7 +8,7 @@ import { createScheduler } from "./scheduler.js";
 import os from "node:os";
 import { createJobs } from "./jobs.js";
 import { createSetups } from "./setups/index.js";
-import { getServer, getSetting } from "./db.js";
+import { getServer, getSetting, setSetting } from "./db.js";
 import { createTerminal } from "./terminal.js";
 import { createLinuxUsers } from "./linuxusers.js";
 import { createMc } from "./mc/index.js";
@@ -27,7 +27,8 @@ export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverO
   });
   const notifier = createNotifier({ db, fetchImpl });
   const monitor = createMonitor({ db, notifier, getStatus: (s) => runtime.status(s), now, sampler });
-  const scheduler = createScheduler({ db, runtime, now });
+  let mcRef = null;
+  const scheduler = createScheduler({ db, runtime, now, runMc: (...a) => mcRef.scheduled(...a) });
   const jobs = createJobs();
   const terminal = createTerminal({ db, ...terminalOptions });
   const linux = createLinuxUsers({ selfUser: setupOptions.user ?? os.userInfo().username, ...linuxOptions });
@@ -46,7 +47,13 @@ export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverO
     restartServer: (id, actor) => runtime.perform(getServer(db, id), "restart", actor),
     ...setupOptions,
   });
-  const mc = createMc({ runtime, fetchImpl, getToken: () => getSetting(db, "github_token", "") || "", getMeta: (id) => setups.metaOf(id) });
+  const mc = createMc({ runtime, fetchImpl, getToken: () => getSetting(db, "github_token", "") || "", getMeta: (id) => setups.metaOf(id),
+    jobs,
+    cfgGet: (id) => { try { return JSON.parse(getSetting(db, `mcgh.${id}`, "") || "null"); } catch { return null; } },
+    cfgSet: (id, v) => setSetting(db, `mcgh.${id}`, JSON.stringify(v)),
+    dataDir: dir,
+  });
+  mcRef = mc;
   return {
     runtime,
     discover,
