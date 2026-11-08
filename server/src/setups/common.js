@@ -1,3 +1,4 @@
+import os from "node:os";
 import { readdirSync } from "node:fs";
 import path from "node:path";
 import { ID, listServers } from "../db.js";
@@ -75,7 +76,9 @@ export async function commandExists(run, cmd) {
 }
 
 // Finds a java binary of at least `need`. Checks PATH first, then /usr/lib/jvm.
-export async function findJava(run, need, jvmDir = "/usr/lib/jvm") {
+export const USER_JVM_DIR = path.join(process.env.CONSOLE_TOOLS_DIR || path.join(os.homedir(), ".console-tools"), "jvm");
+
+export async function findJava(run, need, jvmDir = ["/usr/lib/jvm", USER_JVM_DIR]) {
   const probe = async (bin) => {
     const r = await run(bin, ["-version"]);
     return r.code === 0 ? javaMajorOf(r.stdout + r.stderr) : null;
@@ -83,14 +86,16 @@ export async function findJava(run, need, jvmDir = "/usr/lib/jvm") {
   const inPath = await probe("java");
   if (inPath !== null && inPath >= need) return { bin: "java", major: inPath };
   let best = null;
-  try {
-    for (const d of readdirSync(jvmDir)) {
-      const bin = path.join(jvmDir, d, "bin", "java");
-      const major = await probe(bin);
-      if (major !== null && major >= need && (!best || major < best.major)) best = { bin, major };
+  for (const dir of [jvmDir].flat()) {
+    try {
+      for (const d of readdirSync(dir)) {
+        const bin = path.join(dir, d, "bin", "java");
+        const major = await probe(bin);
+        if (major !== null && major >= need && (!best || major < best.major)) best = { bin, major };
+      }
+    } catch {
+      /* no jvm dir */
     }
-  } catch {
-    /* no jvm dir */
   }
   return best;
 }

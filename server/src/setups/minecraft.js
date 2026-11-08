@@ -3,7 +3,8 @@ import { mkdir, writeFile, rename, stat, rm } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import path from "node:path";
-import { SetupError, nameAndId, intIn, str, javaNeededFor, findJava, detectPm, fail } from "./common.js";
+import os from "node:os";
+import { SetupError, nameAndId, intIn, str, javaNeededFor, findJava, detectPm, fail, USER_JVM_DIR } from "./common.js";
 
 export const FLAVORS = {
   paper: { label: "Paper", blurb: "Fast, plugin-friendly. The usual pick for a survival server." },
@@ -107,19 +108,36 @@ export async function download(fetchImpl, url, dest, log) {
 }
 
 
-// Finds Java `need` or installs it with sudo. Shared by the setup and the version switcher.
+// Downloads a Temurin JRE into Console's own folder: no sudo and no distro package needed.
+async function downloadJava(need, env, ctx) {
+  const arch = { x64: "x64", arm64: "aarch64" }[os.arch()];
+  if (!arch) throw fail(`No ready-made Java download for this CPU (${os.arch()}). Install Java ${need} yourself.`);
+  await mkdir(USER_JVM_DIR, { recursive: true });
+  const tgz = path.join(USER_JVM_DIR, `jre-${need}.tar.gz`);
+  ctx.log(`Downloading Java ${need} (Eclipse Temurin) into ${USER_JVM_DIR}, no sudo needed…`);
+  await download(env.fetch, `https://api.adoptium.net/v3/binary/latest/${need}/ga/linux/${arch}/jre/hotspot/normal/eclipse`, tgz, ctx.log);
+  const r = await env.run("tar", ["-xzf", tgz, "-C", USER_JVM_DIR], { timeout: 120_000 });
+  await rm(tgz, { force: true });
+  if (r.code !== 0) throw fail(`Couldn't unpack Java: ${r.stderr.trim().slice(0, 200)}`);
+}
+
+// Finds Java `need`, else tries the system package, else downloads one. Shared by the setup and the version switcher.
 export async function ensureJava(need, env, ctx) {
   let java = await findJava(env.run, need);
   if (!java) {
-    ctx.log(`This version needs Java ${need}, which isn't installed. Installing it (needs sudo)…`);
+    ctx.log(`This version needs Java ${need}, which isn't installed. Installing it…`);
     const pm = await detectPm(env.run);
-    if (!pm) throw fail(`Install Java ${need} yourself, then try again.`);
-    const pkg = pm === "apt-get" ? `openjdk-${need}-jre-headless` : `java-${need}-openjdk-headless`;
-    if (pm === "apt-get") await ctx.exec("sudo", ["-n", "apt-get", "update", "-qq"], { allowFail: true });
-    await ctx.exec("sudo", ["-n", pm, "install", "-y", pkg]).catch(() => {
-      throw fail(`Couldn't install ${pkg}. Console needs passwordless sudo for this (opc has it on Oracle). You can also run: sudo ${pm} install -y ${pkg}`);
-    });
-    java = await findJava(env.run, need);
+    if (pm) {
+      const pkg = pm === "apt-get" ? `openjdk-${need}-jre-headless` : `java-${need}-openjdk-headless`;
+      if (pm === "apt-get") await ctx.exec("sudo", ["-n", "apt-get", "update", "-qq"], { allowFail: true });
+      const code = await ctx.exec("sudo", ["-n", pm, "install", "-y", pkg], { allowFail: true });
+      if (code !== 0) ctx.log(`The system package ${pkg} isn't available here. Downloading Java directly instead.`);
+      java = await findJava(env.run, need);
+    }
+    if (!java) {
+      await downloadJava(need, env, ctx);
+      java = await findJava(env.run, need);
+    }
     if (!java) throw fail(`Java ${need} still isn't available after installing. Check the log above.`);
   }
   return java;
