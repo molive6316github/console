@@ -72,6 +72,7 @@ app.listen({ port: PORT, host: HOST }).then(
 
 // Background work: status checks + alerts + host metrics (CONSOLE_MONITOR_SEC, 0 = off) and the scheduler.
 const monitorSec = parseInt(process.env.CONSOLE_MONITOR_SEC ?? "60", 10);
+import("./autoimport.js").then(({ autoImport }) => (safeMode ? null : autoImport({ db, discover: services.discover }))).then((r) => r && !r.skipped && console.log(`Found ${r.added.length} thing(s) already running and added them to the dashboard.`)).catch((e) => console.error("Auto-detect failed:", e.message));
 services.start({ monitorSec: Number.isFinite(monitorSec) ? monitorSec : 60 });
 if (safeMode) console.log("Safe mode: server editing, the file editor and commands are disabled.");
 

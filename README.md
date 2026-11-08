@@ -97,6 +97,8 @@ Everyone can change their own password (**Account**, 10+ characters). Forgot the
 
 ## Discover and clean up
 
+On its very first start, Console **adds what it finds already running** (tmux sessions, Docker containers, and systemd services you installed yourself) so the dashboard isn't empty. It happens once; anything you remove stays removed. tmux sessions started by hand have no known start command, so check each one's Settings tab. Skipped in safe mode.
+
 **Discover** (admin) looks at the machine Console runs on. Each item has **Add to Console**, which opens the add-server form filled in.
 
 - **tmux sessions** with their folder and the command they were started with. tmux sessions belong to the Linux user that started them. When Console runs as the same user (the default on Oracle: `opc`), it sees them all; if it runs as a different user it lists that other users' sessions exist but can't control them.
