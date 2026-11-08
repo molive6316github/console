@@ -1,0 +1,18 @@
+{
+  "id": "themes",
+  "name": "Themes",
+  "version": "1.0.0",
+  "description": "Change how the panel and your website look: pick a preset or set your own colours.",
+  "author": "Console",
+  "permissions": ["Adds a stylesheet to the panel and to Console websites"],
+  "defaultEnabled": false,
+  "settings": [
+    { "key": "preset", "type": "select", "label": "Preset", "default": "midnight", "options": [
+      { "value": "midnight", "label": "Midnight (default)" }, { "value": "ocean", "label": "Ocean" }, { "value": "forest", "label": "Forest" }, { "value": "sunset", "label": "Sunset" }, { "value": "grape", "label": "Grape" }, { "value": "light", "label": "Light" }, { "value": "custom", "label": "Custom colours" }] },
+    { "key": "accent", "type": "color", "label": "Custom: accent", "default": "#4ade80" },
+    { "key": "bg", "type": "color", "label": "Custom: background", "default": "#0e1116" },
+    { "key": "panel", "type": "color", "label": "Custom: cards", "default": "#171b22" },
+    { "key": "text", "type": "color", "label": "Custom: text", "default": "#e6e9ef" },
+    { "key": "font", "type": "select", "label": "Font", "default": "system", "options": [{ "value": "system", "label": "System" }, { "value": "serif", "label": "Serif" }, { "value": "mono", "label": "Monospace" }, { "value": "rounded", "label": "Rounded" }] }
+  ]
+}

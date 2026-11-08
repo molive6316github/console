@@ -1,0 +1,19 @@
+{
+  "id": "discord-bot",
+  "name": "Discord bot",
+  "version": "1.0.0",
+  "description": "Posts joins, leaves and server up/down to a Discord channel, and answers /status, /players and /leaderboard slash commands.",
+  "author": "Console",
+  "permissions": ["Sends messages to your Discord webhook", "Answers Discord slash commands at /x/discord-bot/interactions", "Reads server status and player stats"],
+  "defaultEnabled": false,
+  "actions": [{ "label": "Send a test message", "path": "/test" }, { "label": "Register slash commands", "path": "/register" }],
+  "settings": [
+    { "key": "webhookUrl", "type": "secret", "label": "Channel webhook URL", "help": "Discord: channel settings → Integrations → Webhooks → New Webhook → Copy URL. Enough for join/leave/status posts." },
+    { "key": "joins", "type": "bool", "label": "Post when someone joins", "default": true },
+    { "key": "leaves", "type": "bool", "label": "Post when someone leaves", "default": true },
+    { "key": "updown", "type": "bool", "label": "Post when the server goes up or down", "default": true },
+    { "key": "appId", "type": "text", "label": "Application ID (for slash commands)", "help": "discord.com/developers → New Application → General Information." },
+    { "key": "publicKey", "type": "text", "label": "Public key (for slash commands)", "help": "Same page. Then set Interactions Endpoint URL to https://YOUR-PANEL/x/discord-bot/interactions" },
+    { "key": "botToken", "type": "secret", "label": "Bot token (only to register the commands)", "help": "Bot tab → Reset Token. Used once to create /status, /players and /leaderboard." }
+  ]
+}

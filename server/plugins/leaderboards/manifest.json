@@ -1,0 +1,14 @@
+{
+  "id": "leaderboards",
+  "name": "Leaderboards page",
+  "version": "1.0.0",
+  "description": "A ready-made leaderboard page (playtime, kills, deaths, blocks mined, distance, richest) you can link or embed from your website.",
+  "author": "Console",
+  "permissions": ["Reads player stats from your world folder", "Serves a public page at /x/leaderboards/"],
+  "defaultEnabled": false,
+  "settings": [
+    { "key": "title", "type": "text", "label": "Page title", "default": "Leaderboards" },
+    { "key": "hidden", "type": "text", "label": "Hide these players", "help": "Comma separated names, like staff or alts." },
+    { "key": "limit", "type": "number", "label": "Rows per board", "default": 10, "min": 3, "max": 50 }
+  ]
+}

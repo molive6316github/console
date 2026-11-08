@@ -25,6 +25,8 @@ import { claudeCodeRoutes } from "./routes/claudecode.js";
 import { createClaudeCode } from "./claudecode.js";
 import { siteRoutes } from "./routes/sites.js";
 import { nsRoutes } from "./routes/ns.js";
+import { createPluginHost, pluginRoutes } from "./cplugins.js";
+import { createPluginBuilder } from "./pluginbuilder.js";
 import { createNsConfig, createAuthority, createNameserverServer } from "./nameserver.js";
 import { createSites } from "./sites.js";
 import { run as runCmd } from "./drivers/exec.js";
@@ -63,6 +65,7 @@ export function buildApp({
   dnsOptions = null,
   siteOptions = null,
   nsOptions = null,
+  pluginOptions = null,
   claudeOptions = null,
   logRing = createLogRing(),
   autoUpdateEveryMs = 0, // index.js turns this on; tests leave it off
@@ -75,6 +78,13 @@ export function buildApp({
   const bootId = randomUUID(); // changes every start; the UI uses it to know the restart finished
   const app = Fastify({ logger, trustProxy: Boolean(process.env.CONSOLE_TRUST_PROXY) });
   app.register(cookie);
+  // Keep the raw JSON text too: some plugins (Discord) must verify a signature over the exact bytes.
+  app.removeContentTypeParser("application/json");
+  app.addContentTypeParser("application/json", { parseAs: "string", bodyLimit: 1_048_576 }, (req, body, done) => {
+    req.rawBody = body;
+    if (!body) return done(null, undefined);
+    try { done(null, JSON.parse(body)); } catch { const e = new Error("Invalid JSON"); e.statusCode = 400; done(e); }
+  });
   app.decorate("services", services);
 
   // Errors with a status (bad input, conflicts, not found) become clean JSON. Anything else is a 500 that doesn't leak details.
@@ -103,9 +113,11 @@ export function buildApp({
   });
 
   // Websites made on the Website page are served by Host name, before anything else can see the request.
+  let pluginHostRef = null;
   const sites = createSites({
     db, dataDir, run: runCmd, port: parseInt(process.env.PORT ?? "3000", 10),
     caddy: { sitesDir: process.env.CONSOLE_CADDY_SITES || "/etc/caddy/sites", caddyfile: process.env.CONSOLE_CADDYFILE || "/etc/caddy/Caddyfile" },
+    pluginCss: () => pluginHostRef?.css() ?? "",
     publicStatus: async () => (await app.inject({ method: "GET", url: "/api/public/status", headers: { host: "localhost" } })).json(),
     ...(siteOptions ?? {}),
   });
@@ -303,8 +315,17 @@ export function buildApp({
   const ns = nsRoutes(app, { ...ctx, mc: services.mc, nsConfig, nsServer, run: runCmd, publicIp: () => process.env.CONSOLE_PUBLIC_IP, ...(nsOptions?.routes ?? {}) });
   app.addHook("onClose", async () => { await nsServer.stop(); });
   nsRef = ns;
+  // Console plugins (built-in ones live in server/plugins, yours in <data>/plugins).
+  const pluginHost = createPluginHost({ db, dataDir, services, builtinDir: path.resolve(here, "../plugins"), ...(pluginOptions ?? {}) });
+  pluginHostRef = pluginHost;
+  app.decorate("pluginHost", pluginHost);
+  const builder = createPluginBuilder({ dataDir, jobs: services.jobs, claude: pluginOptions?.claude ?? createClaudeCode({ db, jobs: services.jobs, run: runCmd, ...(claudeOptions ?? {}) }), host: pluginHost, repoRoot: path.resolve(here, "../.."), ...(pluginOptions?.builder ?? {}) });
+  pluginRoutes(app, { ...ctx, host: pluginHost, builder });
+  if (pluginOptions?.boot !== false) app.addHook("onReady", async () => { await pluginHost.boot(); });
+  app.addHook("onClose", async () => { pluginHost.shutdown(); });
   siteRoutes(app, { ...ctx, sites });
-  claudeCodeRoutes(app, { ...ctx, claude: createClaudeCode({ db, jobs: services.jobs, run: runCmd, ...(claudeOptions ?? {}) }) });
+  const claude = createClaudeCode({ db, jobs: services.jobs, run: runCmd, ...(claudeOptions ?? {}) });
+  claudeCodeRoutes(app, { ...ctx, claude });
   dnsRoutes(app, { ...ctx, mc: services.mc, publicIp: () => process.env.CONSOLE_PUBLIC_IP, ...(dnsOptions ?? {}) });
   inviteRoutes(app, { ...ctx, cookie: { name: COOKIE, secure: secureCookies } });
   linuxRoutes(app, { ...ctx, linux: services.linux, featureOn: () => getSetting(db, "linux_users_enabled", "0") === "1" });

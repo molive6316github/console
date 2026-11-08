@@ -76,7 +76,7 @@ function $(id){return document.getElementById(id)}`;
 
 const HTML = (title) => `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${title.replace(/[<>&]/g, "")}</title><link rel="stylesheet" href="style.css"></head>
+<title>${title.replace(/[<>&]/g, "")}</title><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="_theme.css"></head>
 <body>
 <header class="hero"><div class="wrap">
   <h1 id="title"></h1><p class="tag" id="tagline"></p>
@@ -112,7 +112,7 @@ export function cleanConfig(input, base = DEFAULT_CONFIG) {
   return { title: s(b.title, 80).trim() || DEFAULT_CONFIG.title, tagline: s(b.tagline, 200), ip: s(b.ip, 120).trim(), accent: b.accent || DEFAULT_CONFIG.accent, discord: url(b.discord), storeUrl: url(b.storeUrl), products };
 }
 
-export function createSites({ db, dataDir, run, caddy = {}, port = 3000, publicStatus, now = () => Date.now() }) {
+export function createSites({ db, dataDir, run, caddy = {}, port = 3000, publicStatus, pluginCss = () => "", now = () => Date.now() }) {
   const root = path.join(dataDir, "sites");
   const read = () => { try { const x = JSON.parse(getSetting(db, "sites", "[]")); return Array.isArray(x) ? x : []; } catch { return []; } };
   const save = (list) => setSetting(db, "sites", JSON.stringify(list));
@@ -223,6 +223,7 @@ export function createSites({ db, dataDir, run, caddy = {}, port = 3000, publicS
       reply.send(JSON.stringify(await (publicStatus?.() ?? { enabled: false })));
       return true;
     }
+    if (rel === "/_theme.css") { reply.header("Cache-Control", "no-store").type(TYPES.css).send(pluginCss()); return true; }
     if (rel.endsWith("/")) rel += "index.html";
     const name = rel.replace(/^\//, "");
     if (!FILE_NAME.test(name)) { reply.code(404).type(TYPES.txt).send("Not found"); return true; }

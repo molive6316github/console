@@ -217,6 +217,18 @@ The GitHub token needs write access to *Contents* on the backup repo. Open TCP 2
 - **Go live checklist**: checks the server (EULA, whitelist, ops, rollback plugin, backups, off-box copy, crash restart, daily restart, memory, alerts) and fixes most of it in one click. **Off-box backups** copy each world backup to any S3-compatible storage (Oracle, Backblaze B2, Cloudflare R2, AWS).
 - **Claude Code** (Panel settings, off by default): installs Claude Code into `~/.console-tools` (no sudo) and opens it in the web terminal so you can sign in with your own account. It needs the web terminal enabled. Claude Code can run commands as Console's user, so it is admin-only, disabled by safe mode, and audited.
 
+## Console plugins (add-ons for Console itself)
+
+Panel → **Console plugins**. They run inside Console, so only switch on ones you trust. Built in, all off until you enable them:
+
+- **Public API**: read-only JSON at `/x/public-api/v1/status`, `/players`, `/leaderboards` (optional API key, CORS).
+- **Leaderboards page**: a public page at `/x/leaderboards/` (playtime, kills, deaths, mined, distance, richest).
+- **Discord bot**: webhook posts for join/leave/up/down plus `/status`, `/players`, `/leaderboard` slash commands.
+- **Themes**: presets or custom colours for the panel and your Console websites.
+- **Announcements**: rotating tips in game chat while players are online.
+
+Missing something? Type what you want in **Build a plugin with Claude**; it writes a draft, you read it, then install. Writing one by hand: see [PLUGINS.md](PLUGINS.md).
+
 ## Web terminal and Linux users (advanced, off by default)
 
 Both are switched on by an admin under **Settings → Advanced tools**, are admin-only, are blocked by safe mode, and are written to the audit log.

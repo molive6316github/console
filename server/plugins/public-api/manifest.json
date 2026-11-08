@@ -1,0 +1,15 @@
+{
+  "id": "public-api",
+  "name": "Public API",
+  "version": "1.0.0",
+  "description": "A read-only JSON API for your website or Discord: online players, status and leaderboards.",
+  "author": "Console",
+  "permissions": ["Reads your server's status and player stats", "Serves public web addresses under /x/public-api/"],
+  "defaultEnabled": false,
+  "settings": [
+    { "key": "apiKey", "type": "secret", "label": "API key (optional)", "help": "If set, callers must send it as the x-api-key header or ?key=. Leave blank for a fully public API." },
+    { "key": "origin", "type": "text", "label": "Allowed website (CORS)", "default": "*", "help": "Use * for any site, or https://shop.yourdomain.com to allow only your website." },
+    { "key": "showNames", "type": "bool", "label": "Show player names", "default": true },
+    { "key": "hidden", "type": "text", "label": "Hide these players from leaderboards", "help": "Comma separated, like staff or alt accounts." }
+  ]
+}

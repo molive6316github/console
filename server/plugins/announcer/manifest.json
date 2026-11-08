@@ -1,0 +1,14 @@
+{
+  "id": "announcer",
+  "name": "Announcements",
+  "version": "1.0.0",
+  "description": "Broadcasts your tips and rules in game chat every few minutes, but only when someone is online.",
+  "author": "Console",
+  "permissions": ["Sends chat messages to your Minecraft server console"],
+  "defaultEnabled": false,
+  "settings": [
+    { "key": "messages", "type": "textarea", "label": "Messages (one per line)", "default": "Welcome! Be kind and have fun.\nNeed help? Ask staff in chat.", "help": "Plain text works best. They rotate in order." },
+    { "key": "everyMin", "type": "number", "label": "Every how many minutes", "default": 10, "min": 1, "max": 240 },
+    { "key": "color", "type": "select", "label": "Colour", "default": "gold", "options": ["gold", "aqua", "green", "yellow", "light_purple", "white"] }
+  ]
+}
