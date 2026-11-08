@@ -7,6 +7,6 @@ export default defineConfig({
     proxy: { "/api": { target: "http://127.0.0.1:3000", ws: true } },
   },
   build: {
-    rollupOptions: { input: { main: resolve(import.meta.dirname, "index.html"), terminal: resolve(import.meta.dirname, "terminal.html") } },
+    rollupOptions: { input: { main: resolve(import.meta.dirname, "index.html"), terminal: resolve(import.meta.dirname, "terminal.html"), status: resolve(import.meta.dirname, "status.html") } },
   },
 });

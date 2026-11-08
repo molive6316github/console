@@ -4,7 +4,7 @@ import { atLeast, getLevel } from "../level.js";
 const ICONS = { minecraft: "⛏️", "git-app": "🤖", "static-site": "🌐", docker: "🐳" };
 
 // Follows a background job (downloads, installs) and shows its output live.
-export function followJob(box, jobId, { life, onDone } = {}) {
+export function followJob(box, jobId, { life, onDone, url } = {}) {
   const status = h("div", { class: "jobstatus" }, "Working…");
   const log = h("pre", { class: "log console", tabindex: "0", "aria-label": "Progress" });
   const result = h("div", {});
@@ -15,7 +15,7 @@ export function followJob(box, jobId, { life, onDone } = {}) {
       if (life?.dead) return;
       let j;
       try {
-        j = await api(`/jobs/${jobId}?since=${since}`);
+        j = await api(url ? url(jobId, since) : `/jobs/${jobId}?since=${since}`);
       } catch (err) {
         status.textContent = err.message;
         status.className = "jobstatus bad";

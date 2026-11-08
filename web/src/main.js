@@ -12,6 +12,8 @@ import { updatesView } from "./views/updates.js";
 import { discoverView, newServerView } from "./views/discover.js";
 import { createView } from "./views/create.js";
 import { linuxView } from "./views/linux.js";
+import { startPanel } from "./panel/panel.js";
+import { invitePage } from "./panel/invite.js";
 import { LEVELS, atLeast, getLevel, setLevel, defaultLevel } from "./level.js";
 
 const app = document.getElementById("app");
@@ -158,14 +160,14 @@ function renderShell() {
 }
 
 window.addEventListener("hashchange", () => {
-  if (!me) return;
+  if (!me || me.mode === "minecraft") return; // the panel does its own routing
   if (hasUnsavedWork() && !confirm("You have unsaved changes. Leave without saving?")) {
     history.replaceState(null, "", shownHash || "#/");
     return;
   }
   render();
 });
-window.addEventListener("console:level", () => me && (renderShell(), render()));
+window.addEventListener("console:level", () => me && me.mode !== "minecraft" && (renderShell(), render()));
 window.addEventListener("console:features", async () => {
   if (!me) return;
   try { me = await api("/me"); } catch { return; }
@@ -179,7 +181,10 @@ async function boot() {
   } catch {
     return renderLogin();
   }
-  if (me.mode === "minecraft") defaultLevel("simple");
+  if (me.mode === "minecraft") {
+    defaultLevel("simple");
+    return startPanel(app, me, { signOut: async () => (await api("/logout", { method: "POST", body: {} }).catch(() => {}), renderLogin()) });
+  }
   renderShell();
   render();
   if (isAdmin()) {
@@ -189,4 +194,7 @@ async function boot() {
   }
 }
 
-boot();
+// Invite links open a sign-up page first; everyone else goes through the normal sign-in.
+const inv = /^#\/invite\/([A-Za-z0-9_-]{20,100})$/.exec(location.hash);
+if (inv) invitePage(app, inv[1], boot);
+else boot();

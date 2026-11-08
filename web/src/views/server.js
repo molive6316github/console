@@ -82,7 +82,7 @@ export function serverView(box, { me, id, tab }) {
 }
 
 // ---- console: live log tail + command box ---------------------------------------------
-function consoleTab(box, { server, life }) {
+export function consoleTab(box, { server, life }) {
   const pre = h("pre", { class: "log console", tabindex: "0", "aria-label": "Server output" });
   const status = h("span", { class: "muted" }, "loading…");
   const paused = h("input", { type: "checkbox" });
@@ -156,7 +156,7 @@ function consoleTab(box, { server, life }) {
 }
 
 // ---- files -----------------------------------------------------------------------------
-function filesTab(box, { server, life }) {
+export function filesTab(box, { server, life }) {
   const base = `/servers/${encodeURIComponent(server.id)}`;
   const crumbs = h("div", { class: "crumbs" });
   const list = h("div", {});
@@ -276,7 +276,7 @@ function filesTab(box, { server, life }) {
 }
 
 // ---- backups ---------------------------------------------------------------------------
-function backupsTab(box, { server }) {
+export function backupsTab(box, { server }) {
   const base = `/servers/${encodeURIComponent(server.id)}/backups`;
   const list = h("div", {});
   const btn = h("button", { class: "primary" }, "Back up now");
@@ -336,7 +336,7 @@ function backupsTab(box, { server }) {
 }
 
 // ---- activity ---------------------------------------------------------------------------
-function activityTab(box, { server }) {
+export function activityTab(box, { server }) {
   api(`/audit?server=${encodeURIComponent(server.id)}&limit=100`).then((rows) =>
     box.append(
       rows.length

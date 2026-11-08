@@ -173,7 +173,18 @@ Install on a fresh box with the Minecraft flavour:
 curl -fsSL https://raw.githubusercontent.com/molive6316github/console/main/install.sh | sudo bash -s -- --minecraft
 ```
 
-(`--standard` switches back.) Console then opens in Simple level with a trimmed menu, and any server that has a `server.properties` gets Minecraft tabs automatically:
+(`--standard` switches back.) Console then becomes a one-server Minecraft panel (think PebbleHost, self-hosted): it opens straight into your server with a left sidebar. First visit as owner shows a "Make your Minecraft server" screen (type, version, memory).
+
+**The panel**
+
+- **Overview**: big Start / Restart / Stop, the address to give friends (copy button), players online, version, live CPU / memory graphs (last hour) and TPS.
+- **Startup & memory**: RAM slider, Java flag presets (Aikar's optimized flags) plus a short allow-list for custom flags (anything that could run code is refused), restart-on-crash (up to 3 tries per 30 minutes, then it alerts you), and an optional daily restart with a 5 minute in-game warning. Applies on the next start.
+- **Version**: switch between Paper, Purpur, Fabric and Vanilla and any version. Server must be stopped, a full backup is taken first, and the old server jar is kept next to the new one. Changing server type or going to an older version needs an explicit tick.
+- **People & invites**: invite by link. Pick a role (Helper, Moderator, Admin) or tick exact permissions (console, commands, power, players, settings, startup, version, plugins, files, backups, activity). Links work once, expire (1 / 7 / 30 days) and are shown only when you create them. Owners alone manage people. Changing someone's permissions signs them out so it takes effect immediately.
+- **Join address & status page**: set a domain, see the exact A / SRV records to create, and optionally turn on a public `/status.html` page (online or not, player count, address; player names only if you allow them).
+- **Activity**: who did what, scoped to this server.
+
+Everything below (players, settings, plugins, files, backups) lives in the same sidebar, and each item only shows up for people who have that permission. Any server that has a `server.properties` gets:
 
 - **Players**: who's online, whitelist / ops / bans, kick, ban, op, say, time, weather, gamemode (fixed command templates, nothing is passed through raw).
 - **Game settings**: a proper editor for `server.properties` (a `.console-bak` copy is kept; passwords are masked).
