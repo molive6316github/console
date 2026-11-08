@@ -64,6 +64,7 @@ const app = buildApp({
   version,
   secureCookies: process.env.CONSOLE_SECURE_COOKIES === "1",
   logger: process.env.CONSOLE_LOG === "1",
+  autoUpdateEveryMs: 10 * 60_000,
 });
 
 app.listen({ port: PORT, host: HOST }).then(

@@ -68,6 +68,7 @@ WIZ_TZ=
 WIZ_WEBHOOK=
 WIZ_KEEP=
 WIZ_TERMINAL=0
+WIZ_AUTOUPDATE=0
 WIZ_LINUX=0
 WIZ_RAN=0
 HAVE_TTY=0
@@ -407,9 +408,11 @@ wizard() {
   [ -n "$WIZ_GH_TOKEN" ] && echo "    GitHub:    token $(mask_tail "$WIZ_GH_TOKEN")${WIZ_GH_ORG:+, org $WIZ_GH_ORG}"
   [ -n "$WIZ_TZ$WIZ_KEEP" ] && echo "    Schedules: ${WIZ_TZ:-default zone}, keep ${WIZ_KEEP:-7} backups"
   [ -n "$WIZ_WEBHOOK" ] && echo "    Alerts:    webhook set"
+  echo "    Updates:   automatic, nightly at 04:00 when nobody is playing (change in the Updates page)"
   [ "$WIZ_TERMINAL$WIZ_LINUX" != 00 ] && echo "    Advanced:  $([ "$WIZ_TERMINAL" = 1 ] && echo 'terminal ')$([ "$WIZ_LINUX" = 1 ] && echo 'linux-users')"
   echo
   yes_no "Go?" y || die "Cancelled. Nothing was changed."
+  WIZ_AUTOUPDATE=1
 }
 
 # Hand the wizard's answers to Console through the env file; Console applies each one once, only where nothing is saved yet.
@@ -422,11 +425,12 @@ write_wizard_env() {
   [ -z "$WIZ_WEBHOOK" ] || env_set CONSOLE_ALERT_WEBHOOK "$WIZ_WEBHOOK"
   [ "$WIZ_TERMINAL" != 1 ] || env_set CONSOLE_ENABLE_TERMINAL 1
   [ "$WIZ_LINUX" != 1 ] || env_set CONSOLE_ENABLE_LINUX_USERS 1
+  [ "$WIZ_AUTOUPDATE" != 1 ] || env_set CONSOLE_AUTO_UPDATE 1 # nightly at 04:00, off in Updates if you dislike it
   return 0
 }
 clear_wizard_env() {
   local k
-  for k in CONSOLE_GITHUB_TOKEN CONSOLE_GITHUB_ORG CONSOLE_TIMEZONE CONSOLE_BACKUP_KEEP CONSOLE_ALERT_WEBHOOK CONSOLE_ENABLE_TERMINAL CONSOLE_ENABLE_LINUX_USERS; do env_del "$k"; done
+  for k in CONSOLE_GITHUB_TOKEN CONSOLE_GITHUB_ORG CONSOLE_TIMEZONE CONSOLE_BACKUP_KEEP CONSOLE_ALERT_WEBHOOK CONSOLE_ENABLE_TERMINAL CONSOLE_ENABLE_LINUX_USERS CONSOLE_AUTO_UPDATE; do env_del "$k"; done
 }
 
 # Runs a command with a spinner; shows the tail of its output only if it fails.

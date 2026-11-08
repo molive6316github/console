@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { run } from "./drivers/exec.js";
@@ -15,6 +15,11 @@ export function createUpdater({
   remote = "origin",
   branch = process.env.CONSOLE_UPDATE_BRANCH || "main",
   buildSteps,
+  // "release": only move to the code of the newest version published on npm (npm is the release gate, GitHub carries the code).
+  // "main": follow the branch head.
+  channel = "main",
+  fetchImpl = fetch,
+  pkgName = "mxt-console",
 } = {}) {
   if (!BRANCH_RE.test(branch)) throw new Error("Bad update branch name");
 
@@ -36,6 +41,23 @@ export function createUpdater({
     return r.code === 0 ? r.stdout.trim() : null;
   }
 
+  const localVersion = () => {
+    try { return JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).version ?? "0.0.0"; } catch { return "0.0.0"; }
+  };
+  const cmp = (a, b) => {
+    const x = String(a).split(".").map((n) => parseInt(n, 10) || 0), y = String(b).split(".").map((n) => parseInt(n, 10) || 0);
+    for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0) ? -1 : 1;
+    return 0;
+  };
+
+  async function latestRelease() {
+    const res = await fetchImpl(`https://registry.npmjs.org/${pkgName}/latest`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) throw new Error(`npm registry answered ${res.status}`);
+    const j = await res.json();
+    if (!/^\d+\.\d+\.\d+$/.test(String(j.version))) throw new Error("npm returned an odd version");
+    return { version: j.version, gitHead: /^[0-9a-f]{40}$/.test(String(j.gitHead ?? "")) ? j.gitHead : null };
+  }
+
   async function check({ force = false } = {}) {
     if (!isCheckout()) {
       return { supported: false, error: "This install is not a git checkout, so it can't update itself." };
@@ -47,9 +69,27 @@ export function createUpdater({
       return { supported: true, ok: false, error: tail(fetched.stderr || fetched.stdout || "git fetch failed", 6) };
     }
     const count = async (range) => parseInt((await git(["rev-list", "--count", range])).stdout, 10) || 0;
-    const behind = await count("HEAD..FETCH_HEAD");
-    const ahead = await count("FETCH_HEAD..HEAD");
-    const commits = (await git(["log", "--format=%h %s", "--max-count=20", "HEAD..FETCH_HEAD"])).stdout
+    let target = "FETCH_HEAD";
+    let release = null;
+    if (channel === "release") {
+      const have = localVersion();
+      try {
+        release = await latestRelease();
+      } catch (e) {
+        return { supported: true, ok: false, error: `Couldn't check npm for new releases: ${e.message}` };
+      }
+      if (cmp(release.version, have) <= 0) target = "HEAD"; // nothing newer is published
+      else if (!release.gitHead) return { supported: true, ok: false, error: `Version ${release.version} is published but npm doesn't say which commit it came from.` };
+      else {
+        const known = (await git(["cat-file", "-e", `${release.gitHead}^{commit}`])).code === 0;
+        const onBranch = known && (await git(["merge-base", "--is-ancestor", release.gitHead, "FETCH_HEAD"])).code === 0;
+        if (!onBranch) return { supported: true, ok: false, error: `Version ${release.version} is published, but its code isn't on ${remote}/${branch} yet. Push it, then check again.` };
+        target = release.gitHead;
+      }
+    }
+    const behind = await count(`HEAD..${target}`);
+    const ahead = await count(`${target}..HEAD`);
+    const commits = (await git(["log", "--format=%h %s", "--max-count=20", `HEAD..${target}`])).stdout
       .split("\n")
       .filter(Boolean);
     const dirty = (await git(["status", "--porcelain", "--untracked-files=no"])).stdout.trim() !== "";
@@ -58,7 +98,11 @@ export function createUpdater({
       ok: true,
       branch,
       current: (await git(["rev-parse", "--short", "HEAD"])).stdout.trim(),
-      latest: (await git(["rev-parse", "--short", "FETCH_HEAD"])).stdout.trim(),
+      latest: (await git(["rev-parse", "--short", target])).stdout.trim(),
+      target: (await git(["rev-parse", target])).stdout.trim(),
+      channel,
+      version: localVersion(),
+      latestVersion: release && cmp(release.version, localVersion()) > 0 ? release.version : null,
       behind,
       ahead,
       dirty,
@@ -87,7 +131,7 @@ export function createUpdater({
       if (info.ahead > 0) return fail("This install has commits that aren't on the remote, so it can't fast-forward.");
 
       const oldHead = (await git(["rev-parse", "HEAD"])).stdout.trim();
-      if (!record("git merge (fast-forward only)", await git(["merge", "--ff-only", "FETCH_HEAD"]))) {
+      if (!record("git merge (fast-forward only)", await git(["merge", "--ff-only", info.target]))) {
         return fail("git merge failed");
       }
 
@@ -108,7 +152,7 @@ export function createUpdater({
     }
   }
 
-  return { check, apply, current };
+  return { check, apply, current, channel };
 }
 
-export const updater = createUpdater();
+export const updater = createUpdater({ channel: process.env.CONSOLE_UPDATE_CHANNEL === "main" ? "main" : "release" });

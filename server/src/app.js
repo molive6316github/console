@@ -6,7 +6,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { updater as defaultUpdater } from "./updater.js";
-import { audit } from "./db.js";
+import { createAutoUpdate } from "./autoupdate.js";
+import { mcRoot } from "./mc/index.js";
+import { audit, listServers } from "./db.js";
 import { createServices } from "./services.js";
 import { serverRoutes } from "./routes/servers.js";
 import { adminRoutes } from "./routes/admin.js";
@@ -47,6 +49,7 @@ export function buildApp({
   canRestart = () => Boolean(process.env.INVOCATION_ID),
   onRestart = () => process.exit(75),
   restartDelayMs = 800,
+  autoUpdateEveryMs = 0, // index.js turns this on; tests leave it off
   dataDir = process.env.CONSOLE_DATA || path.resolve(here, "../../data"),
   services = createServices({ db, dataDir }),
   // Safe mode switches off everything that turns a stolen admin session into code execution:
@@ -202,6 +205,38 @@ export function buildApp({
     if (restarting) setTimeout(onRestart, restartDelayMs); // let this response reach the browser first
     return { ...result, restarting };
   });
+
+  // ---- nightly auto-update (admin settings; the timer only runs when index.js asks for it) ----
+  const autoUpdate = createAutoUpdate({
+    db,
+    updater,
+    notifier: services.notifier,
+    playersOnline: async () => {
+      for (const sv of listServers(db)) {
+        if (!mcRoot(sv)) continue;
+        const st = await services.mc.liveStatus(sv).catch(() => null);
+        if (st?.online && st.players?.online > 0) return true;
+      }
+      return false;
+    },
+    restart: () => canRestart() && setTimeout(onRestart, restartDelayMs),
+  });
+  app.get("/api/update/auto", { preHandler: need("admin") }, async () => ({ ...autoUpdate.get(), last: autoUpdate.lastRun(), channel: updater.channel ?? "release" }));
+  app.put("/api/update/auto", { preHandler: need("admin") }, async (req, reply) => {
+    try {
+      const next = autoUpdate.set(req.body ?? {});
+      audit(db, { username: req.user.username, action: "auto_update_setting", ok: true, detail: next.enabled ? `on, ${String(next.hour).padStart(2, "0")}:00` : "off" });
+      return next;
+    } catch (e) {
+      return reply.code(400).send({ error: e.message });
+    }
+  });
+  app.decorate("autoUpdate", autoUpdate);
+  if (autoUpdateEveryMs > 0) {
+    const t = setInterval(() => autoUpdate.tick().catch(() => {}), autoUpdateEveryMs);
+    t.unref?.();
+    app.addHook("onClose", async () => clearInterval(t));
+  }
 
   // ---- servers, schedules, users, settings, host, audit ---------------------
   const ctx = { app, db, need, allow, runtime: services.runtime, notifier: services.notifier, scheduler: services.scheduler, terminal: services.terminal, safeMode };

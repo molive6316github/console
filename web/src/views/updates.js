@@ -66,6 +66,28 @@ export function updatesView(box, { me, onInfo }) {
     goBtn.disabled = checkBtn.disabled = false;
   }
 
-  box.append(h("div", { class: "titlebar" }, h("h1", {}, "Updates")), h("div", { class: "panel" }, status, list, h("div", { class: "row" }, checkBtn, goBtn), log));
+  // Nightly automatic updates.
+  const autoBox = h("div", { class: "panel" }, h("h2", {}, "Automatic updates"));
+  api("/update/auto").then((a) => {
+    const on = h("input", { type: "checkbox", checked: a.enabled });
+    const hour = h("select", {}, ...Array.from({ length: 24 }, (_, i) => h("option", { value: i }, `${String(i).padStart(2, "0")}:00`)));
+    hour.value = a.hour;
+    const msg = h("small", { class: "muted" });
+    const save = async () => {
+      try {
+        await api("/update/auto", { method: "PUT", body: { enabled: on.checked, hour: Number(hour.value) } });
+        msg.textContent = on.checked ? `On. Console will update itself around ${String(hour.value).padStart(2, "0")}:00, only when nobody is playing.` : "Off.";
+      } catch (e) {
+        msg.textContent = e.message;
+      }
+    };
+    on.addEventListener("change", save);
+    hour.addEventListener("change", save);
+    msg.textContent = a.enabled ? `On. Console will update itself around ${String(a.hour).padStart(2, "0")}:00, only when nobody is playing.` : "Off.";
+    autoBox.append(
+      h("div", { class: "stack wide" }, h("label", { class: "check" }, on, "Update Console automatically every night"), h("label", { class: "field" }, h("span", {}, "Time"), hour), msg,
+        h("small", { class: "muted" }, a.channel === "release" ? "It only installs versions that have been published as releases, never half-finished work. If the build fails it rolls back by itself, and you get an alert either way." : "Following the main branch directly.")));
+  }).catch(() => {});
+  box.append(h("div", { class: "titlebar" }, h("h1", {}, "Updates")), h("div", { class: "panel" }, status, list, h("div", { class: "row" }, checkBtn, goBtn), log), autoBox);
   runCheck(false);
 }

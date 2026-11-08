@@ -66,6 +66,15 @@ Run the installer in a terminal and pick **Create or update an isolated Docker i
 | **Discover** | Scans the machine for tmux sessions, Docker containers, systemd services, big processes and folders, shows what Console can and can't see, and lets you add them to Console or clean them up. |
 | **Audit log** | Every login, action, command, file edit, deletion and settings change. |
 
+## Automatic updates
+
+Console updates itself, which is the nice part of self-hosting: no vendor decides when. New installs have it on (04:00 server time); turn it off or change the hour on the Updates page.
+
+- It only installs versions **published to npm** as releases. `npm publish` is the "ship it" button, so work in progress on `main` never lands on your box. (`CONSOLE_UPDATE_CHANNEL=main` follows the branch head instead.)
+- It checks at the chosen hour and **waits while anyone is online** in your Minecraft server, retrying every 10 minutes until the hour is up.
+- One attempt per day. If the build fails it rolls back to the old version and alerts you; success is announced too.
+- Release flow: commit, `git push`, then `npm publish` (npm records the commit; it must be on GitHub or the box refuses the release).
+
 ## Defining servers
 
 Two ways, and you can mix them:

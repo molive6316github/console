@@ -12,6 +12,7 @@ const SEEDS = [
   ["CONSOLE_BACKUP_KEEP", "backup_keep", (v) => /^\d+$/.test(v) && +v >= 1 && +v <= 50],
   ["CONSOLE_ENABLE_TERMINAL", "terminal_enabled", (v) => v === "1", () => "1"],
   ["CONSOLE_ENABLE_LINUX_USERS", "linux_users_enabled", (v) => v === "1", () => "1"],
+  ["CONSOLE_AUTO_UPDATE", "auto_update", (v) => v === "1", () => JSON.stringify({ enabled: true, hour: 4 })],
 ];
 
 export function seedSettings(db, env = process.env) {
