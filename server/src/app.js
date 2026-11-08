@@ -21,6 +21,9 @@ import { inviteRoutes } from "./routes/invites.js";
 import { statusRoutes } from "./routes/status.js";
 import { systemRoutes } from "./routes/system.js";
 import { dnsRoutes } from "./routes/dns.js";
+import { siteRoutes } from "./routes/sites.js";
+import { createSites } from "./sites.js";
+import { run as runCmd } from "./drivers/exec.js";
 import { createSystem, createLogRing } from "./system.js";
 import { hasPerm, PERMS, PRESETS } from "./perms.js";
 import { getSetting } from "./db.js";
@@ -54,6 +57,7 @@ export function buildApp({
   restartDelayMs = 800,
   system = null,
   dnsOptions = null,
+  siteOptions = null,
   logRing = createLogRing(),
   autoUpdateEveryMs = 0, // index.js turns this on; tests leave it off
   dataDir = process.env.CONSOLE_DATA || path.resolve(here, "../../data"),
@@ -84,12 +88,23 @@ export function buildApp({
     const style = termPage ? "style-src 'self' 'unsafe-inline'" : "style-src 'self'";
     const host = String(req.headers.host ?? "").replace(/[^A-Za-z0-9.:\[\]-]/g, "");
     const connect = termPage && host ? `connect-src 'self' ws://${host} wss://${host}` : "connect-src 'self'";
-    reply.header(
+    if (!reply.getHeader("Content-Security-Policy")) reply.header(
       "Content-Security-Policy",
       `default-src 'self'; img-src 'self' data:; ${style}; script-src 'self'; ${connect}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`
     );
     if (secureCookies) reply.header("Strict-Transport-Security", "max-age=31536000");
     if (req.url.startsWith("/api/")) reply.header("Cache-Control", "no-store");
+  });
+
+  // Websites made on the Website page are served by Host name, before anything else can see the request.
+  const sites = createSites({
+    db, dataDir, run: runCmd, port: parseInt(process.env.PORT ?? "3000", 10),
+    caddy: { sitesDir: process.env.CONSOLE_CADDY_SITES || "/etc/caddy/sites", caddyfile: process.env.CONSOLE_CADDYFILE || "/etc/caddy/Caddyfile" },
+    publicStatus: async () => (await app.inject({ method: "GET", url: "/api/public/status", headers: { host: "localhost" } })).json(),
+    ...(siteOptions ?? {}),
+  });
+  app.addHook("onRequest", async (req, reply) => {
+    if (await sites.serve(req, reply)) return reply;
   });
 
   // ---- auth plumbing -------------------------------------------------------
@@ -262,6 +277,7 @@ export function buildApp({
     return false;
   };
   systemRoutes(app, { ...ctx, system: system ?? createSystem({ jobs: services.jobs }), logs: logRing, jobs: services.jobs, onlinePlayers: playersOnline });
+  siteRoutes(app, { ...ctx, sites });
   dnsRoutes(app, { ...ctx, mc: services.mc, publicIp: () => process.env.CONSOLE_PUBLIC_IP, ...(dnsOptions ?? {}) });
   inviteRoutes(app, { ...ctx, cookie: { name: COOKIE, secure: secureCookies } });
   linuxRoutes(app, { ...ctx, linux: services.linux, featureOn: () => getSetting(db, "linux_users_enabled", "0") === "1" });

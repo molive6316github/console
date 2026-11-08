@@ -8,6 +8,7 @@ import { settingsView } from "../views/settings.js";
 import { updatesView } from "../views/updates.js";
 import { machinePage } from "./system.js";
 import { overviewPage, startupPage, versionPage, peoplePage, joinPage } from "./pages.js";
+import { websitePage } from "./website.js";
 
 // The Minecraft-mode app: one server, a sidebar, nothing generic.
 export function startPanel(app, me, { signOut }) {
@@ -48,6 +49,7 @@ export function startPanel(app, me, { signOut }) {
       { sep: "Share", show: isOwner || has("activity") },
       { id: "people", icon: "☻", label: "People & invites", show: isOwner, render: peoplePage },
       { id: "join", icon: "⌁", label: "Join address & status page", show: isOwner, render: joinPage },
+      { id: "website", icon: "◫", label: "Website", show: isOwner, render: websitePage },
       { id: "activity", icon: "≡", label: "Activity", show: has("activity"), render: (box, o) => activityTab(box, o) },
       { sep: "Panel", show: true },
       { id: "machine", icon: "▥", label: "Machine & logs", show: isOwner, render: machinePage },
