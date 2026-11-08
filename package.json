@@ -55,7 +55,7 @@
     "docker",
     "self-hosted"
   ],
-  "license": "UNLICENSED",
+  "license": "MIT",
   "publishConfig": {
     "access": "public"
   }

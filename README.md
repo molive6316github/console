@@ -311,4 +311,4 @@ Notes:
 
 ## License
 
-TBD before v0.3.
+MIT. See [LICENSE](LICENSE).
