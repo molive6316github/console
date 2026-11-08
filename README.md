@@ -36,7 +36,8 @@ Tests: `npm test`
 | **Alerts** | Discord or Slack webhook when a server that should be up goes down, and when it recovers. |
 | **Host** | CPU, memory and disk now and over 1h / 6h / 24h / 7d. |
 | **Users** | Staff accounts, each limited to the servers you pick. |
-| **Audit log** | Every login, action, command, file edit and settings change. |
+| **Discover** | Scans the machine for tmux sessions, Docker containers, systemd services, big processes and folders, shows what Console can and can't see, and lets you add them to Console or clean them up. |
+| **Audit log** | Every login, action, command, file edit, deletion and settings change. |
 
 ## Defining servers
 
@@ -50,7 +51,7 @@ See `servers.example.json` for one of each type.
 | type | what it does | target |
 |---|---|---|
 | `docker` | start/stop/restart a container | `{ "container": "name" }` |
-| `systemd` | systemd unit on any Linux box over SSH | `{ "host": "user@host", "unit": "nginx.service", "sudo": true }` |
+| `systemd` | systemd unit, over SSH or on this machine | `{ "host": "user@host" or "local", "unit": "nginx.service", "sudo": true }` |
 | `tmux` | long-running process in a tmux session (game servers) | `{ "session", "startCommand", "cwd", "stopCommand", "stopTimeoutSec" }` |
 | `http` | read-only "is this site alive?" | `{ "url", "expectStatus" }` |
 | `dummy` | fake, for development | `{ "startsUp": true }` |
@@ -93,6 +94,23 @@ Each non-admin user is either allowed **all servers** or **only the ones you pic
 Changing a user's role, servers or password signs them out immediately. You can't delete or demote yourself, and the last admin can't be removed.
 
 Everyone can change their own password (**Account**, 10+ characters). Forgot the admin password? Stop the service, delete `data/console.db*`, set `CONSOLE_ADMIN_PASSWORD`, start it again. That wipes users, schedules, history and the audit log (servers from `servers.json` come back; servers added in the browser do not).
+
+## Discover and clean up
+
+**Discover** (admin) looks at the machine Console runs on. Each item has **Add to Console**, which opens the add-server form filled in.
+
+- **tmux sessions** with their folder and the command they were started with. tmux sessions belong to the Linux user that started them: Console runs as `console`, so it can't see or control sessions started as `opc` (it lists that those exist). To manage one, stop it and add it in Console so it runs as `console`.
+- **Docker containers and images**, with which images are unused. Needs `sudo usermod -aG docker console`.
+- **systemd services**: ones you installed (`/etc/systemd/system`), plus system ones on request. Added as `host: "local"`. Controlling a system service as `console` needs a sudoers rule; the error message shows the exact line.
+- **Running processes** (read-only) to spot things started some other way.
+- **Folders** directly inside `/srv`, `/opt` and each `/home/<user>`, with sizes and what they look like (Minecraft, Node, Docker Compose…). Add more places with `CONSOLE_SCAN_DIRS=/mnt/games:/data` (colon-separated).
+
+**Deleting** is deliberate:
+
+- **Kill a tmux session / remove a container or image / prune** stopped containers and untagged images. Docker volumes are never touched. Anything that is a Console server must be removed from Console first (or use its Stop button).
+- **Delete a folder** only works on folders that the scan lists. You must type its exact name, and it offers to save a compressed copy first (on by default; if the copy fails, nothing is deleted). It refuses Console itself, its database, any folder a Console server uses, a folder something is still running from, symlinks, and top-level system folders.
+- **Console's own leftovers**: backups of servers you removed and the saved copies from folder deletions.
+- Everything here is in the audit log, and is disabled in safe mode (scanning still works). Deleting as the `console` user can only remove what that user owns; if some files belong to another user, Console says so instead of pretending it worked.
 
 ## Alerts, schedules, metrics
 
@@ -167,7 +185,7 @@ Notes:
 ## Security notes
 
 - **An admin account can run commands on this machine.** Adding a `tmux` server lets you set its start command, the command box types into a shell-capable process, and the file editor can change a start script. That is the point of the tool, but it means an admin password is as sensitive as an SSH key. Operators can send commands to servers they can access but can't change what runs.
-- **Safe mode** (`CONSOLE_SAFE_MODE=1`) turns off adding/editing servers in the UI, the file editor, and sending commands (including scheduled commands). Servers in `servers.json` and start/stop/restart still work. Use it if you'd rather define servers only by editing the file.
+- **Safe mode** (`CONSOLE_SAFE_MODE=1`) turns off adding/editing servers in the UI, the file editor, and sending commands (including scheduled commands). Deleting from Discover is disabled too. Servers in `servers.json` and start/stop/restart still work. Use it if you'd rather define servers only by editing the file.
 - Binds to `127.0.0.1` by default; the section above is the supported way to expose it. If you set `HOST=0.0.0.0` anyway, it prints a warning unless `CONSOLE_SECURE_COOKIES=1`.
 - Only set `CONSOLE_TRUST_PROXY=1` when a proxy you control sits in front, otherwise clients can fake their IP and dodge the login rate limit.
 - Responses carry CSP, `X-Frame-Options: DENY`, `nosniff`, and HSTS (when secure cookies are on).
@@ -191,6 +209,7 @@ Notes:
 | `CONSOLE_LOG` | off (`1` for request logs) |
 | `CONSOLE_UPDATE_BRANCH` | `main` |
 | `CONSOLE_SAFE_MODE` | off (`1` disables UI server editing, file editor, commands) |
+| `CONSOLE_SCAN_DIRS` | none (colon-separated extra folders for Discover to list) |
 | `CONSOLE_MONITOR_SEC` | `60` (how often to check servers / sample metrics / alert; `0` = off) |
 
 ## Roadmap

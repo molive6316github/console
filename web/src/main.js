@@ -9,6 +9,7 @@ import { settingsView } from "./views/settings.js";
 import { auditView } from "./views/audit.js";
 import { accountView } from "./views/account.js";
 import { updatesView } from "./views/updates.js";
+import { discoverView, newServerView } from "./views/discover.js";
 
 const app = document.getElementById("app");
 let me = null;
@@ -58,7 +59,7 @@ function navItems() {
   const items = [["#/", "Servers", "servers"]];
   if (isAdmin() || me.allServers) items.push(["#/host", "Host", "host"]);
   if (isAdmin()) {
-    items.push(["#/schedules", "Schedules", "schedules"], ["#/users", "Users", "users"], ["#/settings", "Settings", "settings"], ["#/audit", "Audit", "audit"]);
+    items.push(["#/discover", "Discover", "discover"], ["#/schedules", "Schedules", "schedules"], ["#/users", "Users", "users"], ["#/settings", "Settings", "settings"], ["#/audit", "Audit", "audit"]);
     items.push(["#/updates", updateInfo?.ok && updateInfo.behind > 0 ? `Updates (${updateInfo.behind})` : "Updates", "updates"]);
   }
   items.push(["#/account", "Account", "account"]);
@@ -74,6 +75,8 @@ function parseRoute() {
 const VIEWS = {
   servers: { render: serversView },
   host: { render: hostView, allowed: () => isAdmin() || me.allServers },
+  discover: { render: discoverView, admin: true },
+  new: { render: newServerView, admin: true, allowed: () => !me.safeMode },
   schedules: { render: schedulesView, admin: true },
   users: { render: usersView, admin: true },
   settings: { render: settingsView, admin: true },
@@ -85,7 +88,7 @@ const VIEWS = {
 function drawNav() {
   if (!navEl) return;
   const route = parseRoute();
-  const current = route.name === "server" ? "servers" : route.name;
+  const current = route.name === "server" ? "servers" : route.name === "new" ? "discover" : route.name;
   navEl.replaceChildren(...navItems().map(([href, label, key]) => h("a", { href, class: key === current ? "on" : "" }, label)));
 }
 

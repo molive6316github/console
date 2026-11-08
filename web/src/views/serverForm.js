@@ -53,11 +53,12 @@ export const TYPES = {
 };
 
 // Builds the add / edit form. `existing` = { id, name, type, target } when editing.
-export function serverForm({ existing, onSubmit, onCancel }) {
+export function serverForm({ existing, prefill, onSubmit, onCancel }) {
   const editing = Boolean(existing);
-  const id = h("input", { value: existing?.id ?? "", disabled: editing, placeholder: "survival-smp", pattern: "[a-z0-9][a-z0-9\\-]*", required: true });
-  const name = h("input", { value: existing?.name ?? "", placeholder: "Survival SMP", required: true, maxlength: "80" });
-  const type = h("select", {}, Object.entries(TYPES).map(([k, t]) => h("option", { value: k, selected: k === (existing?.type ?? "tmux") }, t.label)));
+  const src = existing ?? prefill;
+  const id = h("input", { value: src?.id ?? "", disabled: editing, placeholder: "survival-smp", pattern: "[a-z0-9][a-z0-9\\-]*", required: true });
+  const name = h("input", { value: src?.name ?? "", placeholder: "Survival SMP", required: true, maxlength: "80" });
+  const type = h("select", {}, Object.entries(TYPES).map(([k, t]) => h("option", { value: k, selected: k === (src?.type ?? "tmux") }, t.label)));
   const fieldsBox = h("div", { class: "stack" });
   const hint = h("p", { class: "muted" });
   const msg = h("div", { class: "error" });
@@ -67,7 +68,7 @@ export function serverForm({ existing, onSubmit, onCancel }) {
     const t = TYPES[type.value];
     hint.textContent = t.hint;
     inputs = {};
-    const old = existing && existing.type === type.value ? existing.target : {};
+    const old = src && src.type === type.value ? src.target : {};
     fieldsBox.replaceChildren(
       ...t.fields.map((f) => {
         let el;
@@ -110,3 +111,15 @@ export function serverForm({ existing, onSubmit, onCancel }) {
   );
   return form;
 }
+
+// Pass a discovered thing to the "new server" screen.
+let pending = null;
+export const setPrefill = (p) => {
+  pending = p;
+};
+export const takePrefill = () => {
+  const p = pending;
+  pending = null;
+  return p;
+};
+export const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "server";

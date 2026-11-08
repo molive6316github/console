@@ -1,17 +1,29 @@
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { createDiscover } from "./discover.js";
 import { createRuntime } from "./runtime.js";
 import { createNotifier } from "./notify.js";
 import { createMonitor } from "./monitor.js";
 import { createScheduler } from "./scheduler.js";
 
 // Wires the long-lived pieces together. Nothing runs on a timer until start() is called.
-export function createServices({ db, dataDir, fetchImpl, now, sampler } = {}) {
-  const runtime = createRuntime({ db, dataDir: dataDir ?? path.resolve("data") });
+export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverOptions = {} } = {}) {
+  const dir = dataDir ?? path.resolve("data");
+  const runtime = createRuntime({ db, dataDir: dir });
+  const extraRoots = (process.env.CONSOLE_SCAN_DIRS ?? "").split(":").filter((d) => d.startsWith("/"));
+  const discover = createDiscover({
+    db,
+    dataDir: dir,
+    selfDir: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."),
+    extraRoots,
+    ...discoverOptions,
+  });
   const notifier = createNotifier({ db, fetchImpl });
   const monitor = createMonitor({ db, notifier, getStatus: (s) => runtime.status(s), now, sampler });
   const scheduler = createScheduler({ db, runtime, now });
   return {
     runtime,
+    discover,
     notifier,
     monitor,
     scheduler,

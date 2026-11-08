@@ -233,3 +233,11 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 4px; font-si
   pre.log.console { height: 45vh; }
 }
 [hidden] { display: none !important; }
+
+/* discover */
+h3 { font-size: 13px; margin: 18px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.empty.small { padding: 14px; font-size: 13px; }
+.notice { font-size: 13px; background: var(--panel-2); border-left: 3px solid var(--unknown); padding: 8px 12px; border-radius: 6px; margin: 10px 0 0; }
+.tag { display: inline-block; font-size: 11px; background: var(--panel-2); border-radius: 6px; padding: 1px 7px; margin-right: 4px; color: var(--muted); }
+tr.unused td { color: var(--muted); }
+td code { overflow-wrap: anywhere; }
