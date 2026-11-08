@@ -19,7 +19,7 @@ function connect() {
   again.hidden = true;
   state.textContent = "connecting…";
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  ws = new WebSocket(`${proto}//${location.host}/api/terminal?cols=${term.cols}&rows=${term.rows}`);
+  ws = new WebSocket(`${proto}//${location.host}/api/terminal?cols=${term.cols}&rows=${term.rows}${new URLSearchParams(location.search).get("run") === "claude" ? "&run=claude" : ""}`);
   ws.onopen = () => {
     state.textContent = "connected";
     term.focus();

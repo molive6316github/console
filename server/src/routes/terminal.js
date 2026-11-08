@@ -28,6 +28,7 @@ export function terminalRoutes(app, { need, terminal, safeMode }) {
           cols: Number(q.cols),
           rows: Number(q.rows),
           safeMode,
+          run: q.run === "claude" ? "claude" : null,
         });
       }
     );

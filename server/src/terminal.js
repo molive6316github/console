@@ -1,5 +1,6 @@
 import { getSetting, audit } from "./db.js";
 import { userFromToken, hasRole } from "./auth.js";
+import { toolsBin } from "./claudecode.js";
 
 const MAX_SESSIONS = 3;
 const IDLE_MS = 30 * 60_000;
@@ -27,10 +28,11 @@ export function createTerminal({ db, loadPty = () => import("@lydell/node-pty"),
   function cleanEnv() {
     const env = { ...process.env };
     for (const k of Object.keys(env)) if (k.startsWith("CONSOLE_") || k.startsWith("CF_") || k === "INVOCATION_ID" || k === "JOURNAL_STREAM") delete env[k];
+    env.PATH = `${toolsBin()}:${env.PATH ?? "/usr/bin:/bin"}`; // Claude Code lives here
     return { ...env, TERM: "xterm-256color", COLORTERM: "truecolor" };
   }
 
-  async function attach(socket, { user, token, ip, cols, rows, safeMode }) {
+  async function attach(socket, { user, token, ip, cols, rows, safeMode, run }) {
     await ensurePty();
     const send = (s) => socket.readyState === 1 && socket.send(s);
     if (!pty) {
@@ -45,6 +47,7 @@ export function createTerminal({ db, loadPty = () => import("@lydell/node-pty"),
       cwd: process.env.HOME || "/",
       env: cleanEnv(),
     });
+    if (run === "claude" && getSetting(db, "claude_code_enabled", "0") === "1") setTimeout(() => term.write("claude\r"), 400); // the only command that can be requested
     const started = now();
     let last = now();
     let closed = false;

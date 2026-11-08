@@ -1,5 +1,6 @@
 import { h, api, toast, field } from "../ui.js";
 import { LEVELS, getLevel, setLevel } from "../level.js";
+import { followJob } from "./create.js";
 
 export async function settingsView(box, { me }) {
   let s;
@@ -106,6 +107,7 @@ export async function settingsView(box, { me }) {
             toggle("Manage Linux users", "Create and delete accounts on this machine, add SSH keys, grant sudo. Needs passwordless sudo for Console's user (opc has it on Oracle).", s.linuxUsersEnabled, "linuxUsersEnabled")
           )
     ),
+    me.safeMode ? null : claudeCodePanel(),
     h(
       "div",
       { class: "panel" },
@@ -122,4 +124,33 @@ export async function settingsView(box, { me }) {
     ),
     h("div", { class: "panel" }, h("h2", {}, "Safe mode"), h("p", { class: "muted" }, me.safeMode ? "Safe mode is ON. Adding/editing servers, the file editor and sending commands are disabled." : "Safe mode is off. To disable adding/editing servers, the file editor and commands (for example on a shared install), set CONSOLE_SAFE_MODE=1 in /etc/console.env and restart Console."))
   );
+}
+
+function claudeCodePanel() {
+  const body = h("div", { class: "stack wide" }, h("p", { class: "muted" }, "Loading…"));
+  const panel = h("div", { class: "panel warn" }, h("h2", {}, "Claude Code on this server"), body);
+  async function draw() {
+    const c = await api("/claude-code");
+    const set = async (enabled) => { try { await api("/claude-code", { method: "PUT", body: { enabled } }); draw(); } catch (e) { toast(e.message, true); } };
+    const out = h("div", {});
+    body.replaceChildren(
+      h("p", { class: "muted" }, "Lets Claude build things right on this machine (plugins, a website, scripts). You sign in with your own Claude account in the web terminal. Off by default."),
+      h("p", { class: "muted small" }, "Heads up: Claude Code can run commands and edit files as Console's Linux user, so whoever controls it controls this server. Admin-only, off in safe mode, and every use is in the Audit log."),
+      h("label", { class: "check" }, h("input", { type: "checkbox", checked: c.enabled, onchange: (e) => set(e.target.checked) }), "Enable Claude Code"),
+      !c.terminalEnabled ? h("p", { class: "muted small" }, "It signs in through the web terminal, so turn that on in Advanced tools first.") : null,
+      c.enabled && !c.installed
+        ? h("div", { class: "row" }, h("button", { class: "primary", disabled: !c.npm, onclick: async () => { try { const r = await api("/claude-code/install", { method: "POST", body: {} }); out.replaceChildren(); followJob(out, r.jobId, { onDone: draw }); } catch (e) { toast(e.message, true); } } }, "Install Claude Code"), c.npm ? null : h("span", { class: "muted small" }, "npm isn't installed on this machine."))
+        : null,
+      c.enabled && c.installed
+        ? h("div", { class: "row" },
+            h("span", {}, `Installed${c.version ? ` (${c.version})` : ""}`),
+            c.terminalEnabled ? h("a", { class: "btn primary", href: "/terminal.html?run=claude", target: "_blank", rel: "noopener" }, "Open Claude Code ↗") : null,
+            h("button", { onclick: async () => { if (!confirm("Remove Claude Code from this server?")) return; try { await api("/claude-code", { method: "DELETE" }); draw(); } catch (e) { toast(e.message, true); } } }, "Remove"))
+        : null,
+      c.enabled && c.installed ? h("p", { class: "muted small" }, "First time: it shows a sign-in link. Open it, log in, paste the code back into the terminal. After that it just opens.") : null,
+      out
+    );
+  }
+  draw().catch((e) => body.replaceChildren(h("div", { class: "error" }, e.message)));
+  return panel;
 }

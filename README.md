@@ -208,6 +208,13 @@ Everything below (players, settings, plugins, files, backups) lives in the same 
 
 The GitHub token needs write access to *Contents* on the backup repo. Open TCP 25565 in your cloud firewall (Oracle: VCN security list) or nobody can join.
 
+## One-click plugins, domains, websites, Claude Code (Minecraft mode)
+
+- **Plugins**: a curated catalog (economy & shops, permissions & ranks, protection, dev libraries, maps/stats) with bundles. Availability is checked against Modrinth for your server's version and loader, and required dependencies are installed with them. Downloads are hash-verified.
+- **Join address & DNS**: type your domain and get the exact A/SRV records to copy, a live ✓/✗ check against public resolvers, and optional one-click creation through a Cloudflare or Vercel API token (stored on the server, never shown again).
+- **Website**: make `shop.yourdomain.com` (a server page or a store page) from a template. Edit the name, join address, Discord link and product cards in the browser; products link out to your checkout (Tebex, Stripe links). Console serves the files itself by hostname; on a normal install it also writes the Caddy block for HTTPS. Docker-instance installs (and installs without Caddy) get the snippet to paste instead.
+- **Claude Code** (Panel settings, off by default): installs Claude Code into `~/.console-tools` (no sudo) and opens it in the web terminal so you can sign in with your own account. It needs the web terminal enabled. Claude Code can run commands as Console's user, so it is admin-only, disabled by safe mode, and audited.
+
 ## Web terminal and Linux users (advanced, off by default)
 
 Both are switched on by an admin under **Settings → Advanced tools**, are admin-only, are blocked by safe mode, and are written to the audit log.

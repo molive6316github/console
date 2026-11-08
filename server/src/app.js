@@ -21,6 +21,8 @@ import { inviteRoutes } from "./routes/invites.js";
 import { statusRoutes } from "./routes/status.js";
 import { systemRoutes } from "./routes/system.js";
 import { dnsRoutes } from "./routes/dns.js";
+import { claudeCodeRoutes } from "./routes/claudecode.js";
+import { createClaudeCode } from "./claudecode.js";
 import { siteRoutes } from "./routes/sites.js";
 import { createSites } from "./sites.js";
 import { run as runCmd } from "./drivers/exec.js";
@@ -58,6 +60,7 @@ export function buildApp({
   system = null,
   dnsOptions = null,
   siteOptions = null,
+  claudeOptions = null,
   logRing = createLogRing(),
   autoUpdateEveryMs = 0, // index.js turns this on; tests leave it off
   dataDir = process.env.CONSOLE_DATA || path.resolve(here, "../../data"),
@@ -278,6 +281,7 @@ export function buildApp({
   };
   systemRoutes(app, { ...ctx, system: system ?? createSystem({ jobs: services.jobs }), logs: logRing, jobs: services.jobs, onlinePlayers: playersOnline });
   siteRoutes(app, { ...ctx, sites });
+  claudeCodeRoutes(app, { ...ctx, claude: createClaudeCode({ db, jobs: services.jobs, run: runCmd, ...(claudeOptions ?? {}) }) });
   dnsRoutes(app, { ...ctx, mc: services.mc, publicIp: () => process.env.CONSOLE_PUBLIC_IP, ...(dnsOptions ?? {}) });
   inviteRoutes(app, { ...ctx, cookie: { name: COOKIE, secure: secureCookies } });
   linuxRoutes(app, { ...ctx, linux: services.linux, featureOn: () => getSetting(db, "linux_users_enabled", "0") === "1" });
