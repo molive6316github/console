@@ -4,3 +4,4 @@ data/
 servers.json
 .env
 *.log
+*.tgz

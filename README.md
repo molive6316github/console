@@ -24,6 +24,17 @@ Dev mode with hot reload (two terminals): `npm run dev:server` and `npm run dev:
 
 Tests: `npm test`
 
+## Run it from npm
+
+```
+npx mxt-console                      # dashboard on http://127.0.0.1:3000, data in ~/.mxt-console
+npx mxt-console start --port 4000 --data ./my-data
+sudo npx mxt-console install --minecraft    # full install: service, HTTPS, firewall, setup wizard
+sudo npx mxt-console docker my-sandbox      # isolated Docker instance
+```
+
+Needs Node 22.13+. The first start prints an admin login once (or set `CONSOLE_ADMIN_PASSWORD`). `install` and `docker` run the same installer as the curl command, which fetches the latest Console from GitHub. Publishing: `npm publish` (the build runs automatically).
+
 ## Setup wizard
 
 Run the install command in a terminal and it walks you through five short steps: what the machine is for (Minecraft host or general), your admin account (type a password or let it generate one), your address (domain + HTTPS, or IP and port), GitHub (token and org), and extras (time zone, backups to keep, a Discord/Slack alert webhook, the advanced web terminal and Linux-user tools). It shows a summary and asks before it changes anything. Run it again with `--reconfigure` to change mode or address later. With `--yes` (or no terminal) it asks nothing; pass the same choices as environment variables: `CONSOLE_ADMIN_PASSWORD`, `CONSOLE_GITHUB_TOKEN`, `CONSOLE_GITHUB_ORG`, `CONSOLE_TIMEZONE`, `CONSOLE_ALERT_WEBHOOK`, `CONSOLE_BACKUP_KEEP`, `CONSOLE_ENABLE_TERMINAL=1`, `CONSOLE_ENABLE_LINUX_USERS=1`. Console applies these once on first start, only where nothing is saved yet, then the installer removes them from `/etc/console.env`.
