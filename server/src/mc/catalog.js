@@ -36,6 +36,8 @@ export const CATALOG = [
 export const BUNDLES = [
   { id: "economy", title: "Economy starter", blurb: "Vault + EssentialsX + QuickShop: money, /pay, and player shops.", slugs: ["vault", "essentialsx", "quickshop-hikari"] },
   { id: "survival", title: "Survival essentials", blurb: "LuckPerms + EssentialsX + CoreProtect + HuskClaims.", slugs: ["luckperms", "essentialsx", "coreprotect", "huskclaims"] },
+  { id: "staff", title: "Staff toolkit", blurb: "LuckPerms ranks + CoreProtect rollback + spark profiler + WorldEdit: what moderators and builders need.", slugs: ["luckperms", "coreprotect", "spark", "worldedit"] },
+  { id: "golive", title: "Ready for real players", blurb: "Ranks, rollback for grief, region protection, essentials and a lag profiler.", slugs: ["luckperms", "essentialsx", "vault", "coreprotect", "worldguard", "spark"] },
   { id: "bedrock", title: "Bedrock friendly", blurb: "Geyser + Floodgate + ViaVersion so almost anyone can join.", slugs: ["geyser", "floodgate", "viaversion"] },
 ];
 

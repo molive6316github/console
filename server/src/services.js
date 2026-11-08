@@ -9,6 +9,8 @@ import os from "node:os";
 import { createJobs } from "./jobs.js";
 import { createSetups } from "./setups/index.js";
 import { getServer, getSetting, setSetting, listServers } from "./db.js";
+import { createOffsite } from "./offsite.js";
+import { createGoLive } from "./mc/golive.js";
 import { createStartup, restartCrons } from "./mc/startup.js";
 import { createStats } from "./mc/stats.js";
 import { mcRoot } from "./mc/index.js";
@@ -53,7 +55,8 @@ export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverO
     restartServer: (id, actor) => runtime.perform(getServer(db, id), "restart", actor),
     ...setupOptions,
   });
-  const mc = createMc({ runtime, fetchImpl, getToken: () => getSetting(db, "github_token", "") || "", getMeta: (id) => setups.metaOf(id),
+  const offsite = createOffsite({ db, backups: runtime.backups, fetchImpl });
+  const mc = createMc({ afterBackup: async (server, r) => { if (offsite.configured()) await offsite.upload(server.id, r.name); }, runtime, fetchImpl, getToken: () => getSetting(db, "github_token", "") || "", getMeta: (id) => setups.metaOf(id),
     jobs,
     saveMeta: (id, m) => setSetting(db, `app.${id}`, JSON.stringify(m)),
     saveTarget: (id, target) => db.prepare("UPDATE servers SET target = ? WHERE id = ?").run(JSON.stringify(target), id),
@@ -84,6 +87,7 @@ export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverO
     now: now ?? (() => Date.now()),
   });
   startupRef = startup;
+  const golive = createGoLive({ db, mc, startup, offsite, run: runCmd, getSetting: (k, d = "") => getSetting(db, k, d), hostMemMb: () => Math.round(os.totalmem() / 1048576) });
   const stats = createStats({
     paneRun: async (session) => (await runCmd("tmux", ["display-message", "-p", "-t", `=${session}:`, "#{pane_pid}"])).stdout,
     cores: os.cpus().length || 1,
@@ -105,6 +109,8 @@ export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverO
     mc,
     startup,
     stats,
+    offsite,
+    golive,
     start({ monitorSec = 60 } = {}) {
       scheduler.start();
       if (monitorSec > 0) {

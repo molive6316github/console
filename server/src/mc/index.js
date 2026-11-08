@@ -41,7 +41,7 @@ async function readJson(file) {
   }
 }
 
-export function createMc({ saveMeta = () => {}, saveTarget = () => {}, validateTarget = (_t, x) => x, run = async () => ({ code: 1, stdout: "", stderr: "" }), versionDeps = {}, runtime, listWaitMs = 900, fetchImpl = fetch, getToken, getMeta, jobs, getJoin = () => ({}), pingImpl = ping, cfgGet = () => null, cfgSet = () => {}, dataDir = "/tmp/console-mc", saveWaitMs = 30_000 }) {
+export function createMc({ saveMeta = () => {}, saveTarget = () => {}, validateTarget = (_t, x) => x, run = async () => ({ code: 1, stdout: "", stderr: "" }), versionDeps = {}, runtime, listWaitMs = 900, fetchImpl = fetch, getToken, getMeta, jobs, getJoin = () => ({}), pingImpl = ping, cfgGet = () => null, cfgSet = () => {}, dataDir = "/tmp/console-mc", saveWaitMs = 30_000, afterBackup = null }) {
   const plugins = createPlugins({ fetchImpl, getToken, getMeta });
   const rootKind = (server) => {
     const root = mcRoot(server);
@@ -104,11 +104,17 @@ export function createMc({ saveMeta = () => {}, saveTarget = () => {}, validateT
     if (!root) throw new McError("This isn't a Minecraft server", 404);
     if (runtime.busy.has(server.id)) throw new McError("Another action is already running on this server", 409);
     const resume = await pauser(server, root)();
+    let result;
     try {
-      return await runtime.perform(server, "backup", actor);
+      result = await runtime.perform(server, "backup", actor);
     } finally {
       await resume?.();
     }
+    // The copy to other storage happens after the world is saving again, so a slow upload never freezes the game.
+    if (afterBackup && result?.name) {
+      try { await afterBackup(server, result); } catch (e) { throw new McError(`Backup saved on this machine, but copying it off-box failed: ${e.message}`, 502); }
+    }
+    return result;
   }
 
   const mustBeStopped = async (server) => {

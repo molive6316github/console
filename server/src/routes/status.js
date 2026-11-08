@@ -7,7 +7,7 @@ import { parseTps } from "../mc/stats.js";
 const TTL = 10_000;
 const DOMAIN = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
 
-export function statusRoutes(app, { db, need, allow, mc, startup, stats, setups, jobs, safeMode }) {
+export function statusRoutes(app, { db, need, allow, mc, startup, stats, setups, jobs, safeMode, golive, offsite }) {
   const jobServer = new Map(); // job id -> server id, so people with 'versions' only see this server's jobs
   const cfg = () => {
     try { return { enabled: false, names: false, ...JSON.parse(getSetting(db, "public_status", "{}")) }; } catch { return { enabled: false, names: false }; }
@@ -136,4 +136,31 @@ export function statusRoutes(app, { db, need, allow, mc, startup, stats, setups,
     return { ok: true };
   }));
   void safeMode;
+
+  // ---- go-live checklist ----
+  app.get("/api/servers/:id/mc/golive", { preHandler: [need("admin"), scoped] }, wrap(async (req) => golive.checks(req.srv)));
+  app.post("/api/servers/:id/mc/golive/fix", { preHandler: [need("admin"), scoped] }, wrap(async (req, reply) => {
+    if (safeMode) return reply.code(403).send({ error: "Safe mode is on: this is disabled" });
+    const r = await golive.fix(req.srv, String(req.body?.id ?? ""));
+    audit(db, { username: req.user.username, action: "golive_fix", ok: true, detail: `${req.srv.id}: ${req.body?.id}` });
+    return r;
+  }));
+
+  // ---- off-box backups ----
+  const offWrap = (fn) => async (req, reply) => {
+    try { return await fn(req, reply); } catch (e) { if (e.name === "OffsiteError") return reply.code(e.status).send({ error: e.message }); throw e; }
+  };
+  app.get("/api/offsite", { preHandler: need("admin") }, async () => offsite.view());
+  app.put("/api/offsite", { preHandler: need("admin") }, offWrap(async (req, reply) => {
+    if (safeMode) return reply.code(403).send({ error: "Safe mode is on: this is disabled" });
+    const v = await offsite.save(req.body ?? {});
+    audit(db, { username: req.user.username, action: "offsite_set", ok: true, detail: v.bucket });
+    return v;
+  }));
+  app.post("/api/offsite/test", { preHandler: need("admin") }, offWrap(async () => offsite.test()));
+  app.delete("/api/offsite", { preHandler: need("admin") }, async (req) => {
+    offsite.remove();
+    audit(db, { username: req.user.username, action: "offsite_set", ok: true, detail: "removed" });
+    return { configured: false };
+  });
 }

@@ -103,3 +103,8 @@ input[type="range"] { flex: 1; min-width: 160px; accent-color: var(--grass); }
 @media (max-width: 800px) { .prod { grid-template-columns: 1fr; } }
 .snippet { background: var(--bg, #0e1116); padding: 10px 12px; border-radius: 8px; overflow-x: auto; font-size: 13px; }
 textarea.code { width: 100%; font-family: ui-monospace, monospace; font-size: 13px; }
+
+.golive-row { align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--line, #232a35); }
+.golive-row .grow { flex: 1; }
+.gl-ico { width: 24px; height: 24px; border-radius: 50%; display: inline-grid; place-items: center; font-weight: 800; background: #2a323d; flex: none; }
+.gl-ico.good { background: #1f6f3a; } .gl-ico.bad { background: #8a2a2a; } .gl-ico.wait { background: #7a5a12; }

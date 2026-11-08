@@ -9,6 +9,7 @@ import { updatesView } from "../views/updates.js";
 import { machinePage } from "./system.js";
 import { overviewPage, startupPage, versionPage, peoplePage, joinPage } from "./pages.js";
 import { websitePage } from "./website.js";
+import { goLivePage } from "./golive.js";
 
 // The Minecraft-mode app: one server, a sidebar, nothing generic.
 export function startPanel(app, me, { signOut }) {
@@ -37,6 +38,7 @@ export function startPanel(app, me, { signOut }) {
     const kind = server?.mc?.kind === "mods" ? "Mods" : "Plugins";
     return [
       { id: "overview", icon: "▣", label: "Overview", show: true, render: overviewPage },
+      { id: "golive", icon: "✔", label: "Go live checklist", show: isOwner, render: goLivePage },
       { id: "console", icon: "›_", label: "Console", show: has("console"), render: consoleTab },
       { id: "players", icon: "☺", label: "Players", show: has("players"), render: playersTab },
       { id: "plugins", icon: "✚", label: kind, show: has("plugins"), render: pluginsTab },
