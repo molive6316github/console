@@ -20,6 +20,7 @@ import { mcRoutes } from "./routes/mc.js";
 import { inviteRoutes } from "./routes/invites.js";
 import { statusRoutes } from "./routes/status.js";
 import { systemRoutes } from "./routes/system.js";
+import { dnsRoutes } from "./routes/dns.js";
 import { createSystem, createLogRing } from "./system.js";
 import { hasPerm, PERMS, PRESETS } from "./perms.js";
 import { getSetting } from "./db.js";
@@ -52,6 +53,7 @@ export function buildApp({
   onRestart = () => process.exit(75),
   restartDelayMs = 800,
   system = null,
+  dnsOptions = null,
   logRing = createLogRing(),
   autoUpdateEveryMs = 0, // index.js turns this on; tests leave it off
   dataDir = process.env.CONSOLE_DATA || path.resolve(here, "../../data"),
@@ -260,6 +262,7 @@ export function buildApp({
     return false;
   };
   systemRoutes(app, { ...ctx, system: system ?? createSystem({ jobs: services.jobs }), logs: logRing, jobs: services.jobs, onlinePlayers: playersOnline });
+  dnsRoutes(app, { ...ctx, mc: services.mc, publicIp: () => process.env.CONSOLE_PUBLIC_IP, ...(dnsOptions ?? {}) });
   inviteRoutes(app, { ...ctx, cookie: { name: COOKIE, secure: secureCookies } });
   linuxRoutes(app, { ...ctx, linux: services.linux, featureOn: () => getSetting(db, "linux_users_enabled", "0") === "1" });
 

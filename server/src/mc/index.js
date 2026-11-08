@@ -155,6 +155,14 @@ export function createMc({ saveMeta = () => {}, saveTarget = () => {}, validateT
     }
   }
 
+  async function portOf(server) {
+    const root = mcRoot(server);
+    if (!root) return 25565;
+    try {
+      return Number(parse(await fs.readFile(path.join(root, "server.properties"), "utf8")).values["server-port"]) || 25565;
+    } catch { return 25565; }
+  }
+
   // Asks the console for TPS and returns the last lines. Paper/Purpur: `tps`. Vanilla: `tick query`.
   async function readTps(server, flavor) {
     const driver = getDriver(server.type);
@@ -237,7 +245,7 @@ export function createMc({ saveMeta = () => {}, saveTarget = () => {}, validateT
   }
 
   return {
-    getProps, setProps, players, act, liveStatus, joinInfo, safeBackup, switchVersion, readTps, runtimeStatus: (x) => runtime.status(x).catch(() => "unknown"), restore, reset, gh, scheduled,
+    getProps, setProps, players, act, liveStatus, joinInfo, safeBackup, switchVersion, portOf, readTps, runtimeStatus: (x) => runtime.status(x).catch(() => "unknown"), restore, reset, gh, scheduled,
     plugins: {
       kind: (server) => rootKind(server).kind,
       list: async (server) => { const { root, kind } = rootKind(server); return { kind, files: await plugins.list(root, kind) }; },

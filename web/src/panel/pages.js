@@ -302,8 +302,11 @@ export async function peoplePage(box, { server, me, life }) {
   loadInvites();
 }
 
-// ---- Join address + public status page -----------------------------------------------------------
-export async function joinPage(box, { server }) {
+// ---- Domains: records to copy, live check, optional auto-create ---------------------------------
+const copyCell = (text) => h("button", { class: "copycell", title: "Copy", onclick: () => copyText(text) }, h("code", {}, text), h("span", { class: "cp" }, "⧉"));
+const STATE = { ok: ["✓ correct", "good"], wrong: ["✗ points elsewhere", "bad"], missing: ["… not added yet", "wait"], error: ["? couldn't check", "wait"] };
+
+export async function joinPage(box, { server, life }) {
   const [j, pub] = await Promise.all([api(`${base(server)}/join`), api(`${base(server)}/public`).catch(() => null)]);
   const domain = h("input", { value: pub?.domain ?? "", placeholder: "play.example.com", autocomplete: "off", spellcheck: "false" });
   const srv = h("input", { type: "checkbox", checked: Boolean(pub?.srv) });
@@ -320,26 +323,75 @@ export async function joinPage(box, { server }) {
       msg.textContent = e.message;
     }
   };
+  const dnsBox = h("div", { class: "panel" }, h("h2", {}, "DNS records"), h("div", { class: "muted" }, "Loading…"));
+  const provBox = h("div", { class: "panel" });
   box.append(
     h("div", { class: "panel" },
       h("h2", {}, "Join address"),
       j.address ? h("div", { class: "row tight" }, h("code", { class: "bigaddr" }, j.address), h("button", { onclick: () => copyText(j.address) }, "Copy")) : h("p", { class: "muted" }, "No address yet."),
-      h("div", { class: "stack wide" },
-        field("Your domain (optional)", domain, "Something like play.yourname.com. Point it at this machine with the records below."),
-        h("label", { class: "check" }, srv, "I added an SRV record (players won't need to type the port)")),
-      j.records.length
-        ? h("div", {}, h("h3", {}, "DNS records to add at your domain provider"), h("table", { class: "dns" }, h("tbody", {}, ...j.records.map((r) => h("tr", {}, h("td", {}, r.type), h("td", {}, h("code", {}, r.name)), h("td", {}, h("code", {}, r.value)), h("td", { class: "muted" }, r.note))))))
-        : h("p", { class: "muted" }, j.domain ? "" : "Enter a domain above and the exact records to create will show up here.")
-    ),
+      h("div", { class: "stack wide" }, field("Your domain (optional)", domain, "Like play.yourname.com. Save it and the exact DNS records appear below, ready to copy."), h("div", { class: "row" }, h("button", { class: "primary", onclick: save }, "Save domain")))),
+    dnsBox,
+    provBox,
     h("div", { class: "panel" },
       h("h2", {}, "Public status page"),
       h("p", { class: "muted" }, "A page anyone can open (no login) showing whether the server is online and how many are playing. Share it in your Discord."),
       h("div", { class: "stack wide" },
         h("label", { class: "check" }, enabled, "Turn on the public page"),
         h("label", { class: "check" }, names, "Show player names"),
-        pub?.enabled ? h("div", { class: "row tight" }, h("code", { class: "link" }, `${location.origin}/status.html`), h("button", { onclick: () => copyText(`${location.origin}/status.html`) }, "Copy")) : null)
-    ),
+        pub?.enabled ? h("div", { class: "row tight" }, h("code", { class: "link" }, `${location.origin}/status.html`), h("button", { onclick: () => copyText(`${location.origin}/status.html`) }, "Copy")) : null)),
     msg,
     h("div", { class: "row" }, h("button", { class: "primary", onclick: save }, "Save"))
   );
+  void srv;
+
+  async function drawProvider(info) {
+    const p = info.provider;
+    const g = info.guess;
+    const kind = h("select", {}, h("option", { value: "cloudflare" }, "Cloudflare"), h("option", { value: "vercel" }, "Vercel"));
+    kind.value = g?.kind ?? "cloudflare";
+    const token = h("input", { type: "password", placeholder: "Paste API token", autocomplete: "off" });
+    const team = h("input", { placeholder: "Team ID (only if the domain is on a Vercel team)", autocomplete: "off" });
+    const help = h("p", { class: "muted small" });
+    const setHelp = () => (help.textContent = kind.value === "cloudflare" ? "Cloudflare: My Profile → API Tokens → Create Token → \"Edit zone DNS\" template → pick your domain. Copy the token." : "Vercel: Account Settings → Tokens → Create. Console only touches DNS records.");
+    kind.addEventListener("change", setHelp);
+    setHelp();
+    provBox.replaceChildren(
+      h("h2", {}, "Add the records for me"),
+      g?.name ? h("p", { class: "muted" }, `Your domain's DNS is run by ${g.name}.${g.kind ? "" : " Console can't add records there automatically yet, so use the copy buttons above (it takes a minute)."}`) : null,
+      p
+        ? h("div", {}, h("p", {}, `Connected to ${p.kind} (token ending ${p.tokenTail}).`),
+            h("div", { class: "row" },
+              h("button", { class: "primary", onclick: async () => { try { const r = await api("/dns/apply", { method: "POST", body: {} }); const bad = r.results.filter((x) => x.error); toast(bad.length ? bad[0].error : "Records are in place. It can take a few minutes to show up.", Boolean(bad.length)); drawDns(); } catch (e) { toast(e.message, true); } } }, "Add / fix all records now"),
+              h("button", { onclick: async () => { await api("/dns/provider", { method: "DELETE" }); load(); } }, "Disconnect")))
+        : h("div", { class: "stack wide" }, field("Provider", kind), token, kind.value === "vercel" ? team : null, help,
+            h("div", { class: "row" }, h("button", { class: "primary", onclick: async () => { try { await api("/dns/provider", { method: "PUT", body: { kind: kind.value, token: token.value.trim(), teamId: team.value.trim() } }); toast("Connected"); load(); } catch (e) { toast(e.message, true); } } }, "Connect")),
+            h("small", { class: "muted" }, "The token is stored on this server only and can edit DNS, so keep it to a DNS-only token. You can disconnect any time."))
+    );
+  }
+
+  async function drawDns() {
+    let c;
+    try { c = await api("/dns/check"); } catch (e) { return void dnsBox.replaceChildren(h("h2", {}, "DNS records"), h("div", { class: "error" }, e.message)); }
+    if (!c.hosts.length) return void dnsBox.replaceChildren(h("h2", {}, "DNS records"), h("p", { class: "muted" }, "Save a domain above and the records to create show up here."));
+    dnsBox.replaceChildren(
+      h("h2", {}, "DNS records"),
+      h("p", { class: "muted" }, "Add these at the company where you bought the domain (its DNS page). Click any value to copy it. This page checks again every few seconds and ticks them off."),
+      ...c.hosts.map((x) => h("table", { class: "dns" },
+        h("thead", {}, h("tr", {}, ...["Type", "Name / Host", "Value / Points to", ""].map((t) => h("th", {}, t)))),
+        h("tbody", {}, ...x.records.map((r) => {
+          const [label, cls] = STATE[r.check.state] ?? STATE.error;
+          return h("tr", {}, h("td", {}, h("strong", {}, r.type)), h("td", {}, copyCell(r.name)), h("td", {}, copyCell(r.value)), h("td", { class: `st ${cls}` }, label, r.check.found ? h("small", { class: "muted" }, ` now: ${r.check.found}`) : null));
+        })))),
+      c.allGood ? h("p", { class: "jobstatus good" }, "✓ All records are live. You're done.") : h("p", { class: "muted small" }, "DNS changes can take a few minutes (rarely longer). The name field wants just what's shown; some providers want it relative (play) and some full. If yours wants relative, drop the domain part.")
+    );
+    return c.allGood;
+  }
+
+  async function load() {
+    const info = await api("/dns").catch(() => null);
+    if (info) drawProvider(info);
+    drawDns();
+  }
+  load();
+  life.every(async () => { if (document.hidden) return; await drawDns(); }, 8000);
 }
