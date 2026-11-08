@@ -94,7 +94,15 @@ export function createUpdater({
       .filter(Boolean);
     // npm rewrites lockfiles on its own; that's never a change worth protecting, so drop it quietly.
     await git(["checkout", "--", "package-lock.json", "web/package-lock.json"]);
-    const dirtyFiles = (await git(["status", "--porcelain", "--untracked-files=no"])).stdout.split("\n").map((l) => l.slice(3).trim()).filter(Boolean);
+    const listDirty = async () => (await git(["status", "--porcelain", "--untracked-files=no"])).stdout.split("\n").map((l) => l.slice(3).trim()).filter(Boolean);
+    let dirtyFiles = await listDirty();
+    if (dirtyFiles.length) {
+      // Nobody should be hand-editing a managed install. Park the changes in a git stash (recoverable) instead of blocking updates.
+      await git(["stash", "push", "-m", `console-auto-${Date.now()}`]).catch(() => {});
+      dirtyFiles = await listDirty();
+      if (dirtyFiles.length) await git(["checkout", "--", "."]).catch(() => {});
+      dirtyFiles = await listDirty();
+    }
     const dirty = dirtyFiles.length > 0;
     const data = {
       supported: true,

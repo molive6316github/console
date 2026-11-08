@@ -75,14 +75,14 @@ test("updater: a failing build rolls back to the old commit", async () => {
   assert.equal(git(install, "rev-parse", "HEAD"), before);
 });
 
-test("updater: refuses to overwrite local changes to tracked files", async () => {
+test("updater: parks local changes in a stash instead of blocking", async () => {
   const { install, push } = fixture();
   writeFileSync(path.join(install, "a.txt"), "my local edit\n");
   push("second");
   const res = await createUpdater({ root: install, buildSteps: noop }).apply();
-  assert.equal(res.ok, false);
-  assert.match(res.error, /local changes/);
-  assert.equal(readFileSync(path.join(install, "a.txt"), "utf8"), "my local edit\n");
+  assert.equal(res.ok, true);
+  assert.notEqual(readFileSync(path.join(install, "a.txt"), "utf8"), "my local edit\n");
+  assert.match(git(install, "stash", "list"), /console-auto/);
 });
 
 test("updater: a failed fetch is reported, not thrown", async () => {
