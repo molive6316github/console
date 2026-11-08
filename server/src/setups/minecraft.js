@@ -173,6 +173,7 @@ export default {
     }
     ctx.log(`Remember: Oracle Cloud needs an ingress rule for TCP ${c.port} (VCN > Security List) before friends can join.`);
 
+    env.saveMeta(c.id, { kind: "minecraft", flavor: c.flavor, version: c.version });
     const heap = `${c.memoryMb}M`;
     return {
       id: c.id,

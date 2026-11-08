@@ -43,6 +43,7 @@ export function adminRoutes(app, { db, need, runtime, notifier, scheduler, safeM
     return {
       alertWebhook: maskWebhook(hook),
       alertsConfigured: Boolean(hook),
+      githubOrg: getSetting(db, "github_org", ""),
       terminalEnabled: getSetting(db, "terminal_enabled", "0") === "1",
       linuxUsersEnabled: getSetting(db, "linux_users_enabled", "0") === "1",
       githubToken: getSetting(db, "github_token", "") ? "••••" + String(getSetting(db, "github_token")).slice(-4) : "",
@@ -69,6 +70,11 @@ export function adminRoutes(app, { db, need, runtime, notifier, scheduler, safeM
       setSetting(db, setting, b[key] ? "1" : "0");
       audit(db, { username: req.user.username, action: `${setting}_${b[key] ? "on" : "off"}`, ok: true });
       if (key === "terminalEnabled" && !b[key]) terminal.closeAll("terminal was turned off");
+    }
+    if (b.githubOrg !== undefined) {
+      const o = typeof b.githubOrg === "string" ? b.githubOrg.trim() : null;
+      if (o === null || (o && !/^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/.test(o))) return reply.code(400).send({ error: "That isn't a valid GitHub user or organization name" });
+      setSetting(db, "github_org", o);
     }
     if (b.githubToken !== undefined) {
       const t = typeof b.githubToken === "string" ? b.githubToken.trim() : null;

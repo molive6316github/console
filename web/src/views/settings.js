@@ -12,6 +12,7 @@ export async function settingsView(box, { me }) {
   const tz = h("input", { value: s.timezone, placeholder: "America/New_York", spellcheck: "false" });
   const keep = h("input", { type: "number", min: "1", max: "50", value: String(s.backupKeep) });
   const msg = h("div", { class: "error" });
+  const ghOrg = h("input", { value: s.githubOrg ?? "", placeholder: "your-org (optional)", autocomplete: "off", spellcheck: "false" });
   const ghToken = h("input", { type: "password", autocomplete: "off", spellcheck: "false", placeholder: s.githubToken ? `Saved (${s.githubToken}). Paste a new one to replace.` : "ghp_… or github_pat_…" });
 
   function toggle(label, help, on, key) {
@@ -78,9 +79,10 @@ export async function settingsView(box, { me }) {
       h("p", { class: "muted" }, "Only needed for private repositories. Create a fine-grained token on GitHub with read-only \"Contents\" access to just the repos you want. It is stored on this machine, never shown again, and never printed in logs."),
       h(
         "form",
-        { class: "stack wide", onsubmit: async (e) => (e.preventDefault(), ghToken.value.trim() && (await save({ githubToken: ghToken.value.trim() }, "Token saved"), (ghToken.value = ""))) },
+        { class: "stack wide", onsubmit: async (e) => (e.preventDefault(), (ghToken.value.trim() ? await save({ githubToken: ghToken.value.trim(), githubOrg: ghOrg.value.trim() }, "Saved") : await save({ githubOrg: ghOrg.value.trim() }, "Saved")), (ghToken.value = "")) },
         field("GitHub token", ghToken),
-        h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, "Save token"), s.githubToken && h("button", { type: "button", class: "danger", onclick: () => confirm("Forget the GitHub token?") && save({ githubToken: "" }, "Token removed").then(() => location.reload()) }, "Remove"))
+        field("Your GitHub team or username", ghOrg, "Minecraft plugin installs list this organization's repos so you can pick your own plugins."),
+        h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, "Save"), s.githubToken && h("button", { type: "button", class: "danger", onclick: () => confirm("Forget the GitHub token?") && save({ githubToken: "" }, "Token removed").then(() => location.reload()) }, "Remove"))
       )
     ),
     h(

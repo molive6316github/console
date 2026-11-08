@@ -4,6 +4,7 @@ import { getDriver } from "../drivers/index.js";
 import { filesRootOf } from "../runtime.js";
 import { McError, view, apply } from "./props.js";
 import { buildCommand, parseList } from "./players.js";
+import { createPlugins } from "./plugins.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -32,7 +33,13 @@ async function readJson(file) {
   }
 }
 
-export function createMc({ runtime, listWaitMs = 900 }) {
+export function createMc({ runtime, listWaitMs = 900, fetchImpl = fetch, getToken, getMeta }) {
+  const plugins = createPlugins({ fetchImpl, getToken, getMeta });
+  const rootKind = (server) => {
+    const root = mcRoot(server);
+    if (!root) throw new McError("This isn't a Minecraft server", 404);
+    return { root, kind: mcKind(root) };
+  };
   async function getProps(server) {
     const root = mcRoot(server);
     if (!root) throw new McError("This isn't a Minecraft server (no server.properties in its folder)", 404);
@@ -82,5 +89,18 @@ export function createMc({ runtime, listWaitMs = 900 }) {
     return { ok: true, command: cmd };
   }
 
-  return { getProps, setProps, players, act };
+  return {
+    getProps, setProps, players, act,
+    plugins: {
+      kind: (server) => rootKind(server).kind,
+      list: async (server) => { const { root, kind } = rootKind(server); return { kind, files: await plugins.list(root, kind) }; },
+      toggle: async (server, file, enabled) => { const { root, kind } = rootKind(server); return plugins.setEnabled(root, kind, file, enabled === true); },
+      remove: async (server, file) => { const { root, kind } = rootKind(server); return plugins.remove(root, kind, file); },
+      modrinthSearch: (server, q, version) => { const { kind } = rootKind(server); return plugins.modrinthSearch({ kind, id: server.id, q, version }); },
+      modrinthInstall: (server, slug, version) => { const { root, kind } = rootKind(server); return plugins.modrinthInstall({ root, kind, id: server.id, slug, version }); },
+      githubRepos: (owner) => plugins.githubRepos(owner),
+      githubReleases: (repo) => plugins.githubReleases(repo),
+      githubInstall: (server, repo, assetId) => { const { root, kind } = rootKind(server); return plugins.githubInstall({ root, kind, repo, assetId }); },
+    },
+  };
 }

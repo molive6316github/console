@@ -57,7 +57,7 @@ export function createSetups({ db, jobs, startServer, restartServer, fetchImpl =
   function updateApp(serverId, actor) {
     const meta = metaOf(serverId);
     const server = getServer(db, serverId);
-    if (!meta || !server) throw new SetupError("Console didn't set this up from GitHub, so it can't update it");
+    if (!meta?.repo && meta?.kind !== "static" || !server) throw new SetupError("Console didn't set this up from GitHub, so it can't update it");
     const e = env();
     return jobs.start({ title: `Update ${server.name} from GitHub`, actor, redact: tokenSecrets(e.token) }, async (ctx) => {
       const r = await updateFromGit({ meta, ctx: { ...ctx, run }, env: e });

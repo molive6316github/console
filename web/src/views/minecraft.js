@@ -139,3 +139,90 @@ export async function gameTab(box, { server, reload }) {
     ...[otherPanel, msg, h("div", { class: "row" }, h("button", { class: "primary", onclick: save }, "Save changes")), restart].filter(Boolean)
   );
 }
+
+// ---- Plugins / mods ---------------------------------------------------------------------
+export async function pluginsTab(box, { server, me }) {
+  const kindWord = server.mc.kind === "mods" ? "mod" : "plugin";
+  const installed = h("div", {});
+  const modrinth = h("div", {});
+  const github = h("div", {});
+  box.append(
+    h("p", { class: "notice" }, `Installing a ${kindWord} runs someone else's code on your server. Only add ones you trust. Changes apply after a restart.`),
+    h("div", { class: "panel" }, h("h2", {}, `Installed ${kindWord}s`), installed),
+    h("div", { class: "panel" }, h("h2", {}, "Find on Modrinth"), modrinth),
+    h("div", { class: "panel" }, h("h2", {}, "From GitHub"), github)
+  );
+  const base = `/servers/${encodeURIComponent(server.id)}/mc`;
+
+  async function drawInstalled() {
+    try {
+      const { files } = await api(`${base}/plugins`);
+      installed.replaceChildren(
+        files.length === 0
+          ? h("p", { class: "muted" }, `No ${kindWord}s yet.`)
+          : h("table", {}, h("tbody", {}, ...files.map((f) => h("tr", { class: f.enabled ? "" : "off" }, h("td", {}, f.file.replace(/\.disabled$/, ""), !f.enabled && h("span", { class: "tag" }, "off")), h("td", { class: "muted" }, `${Math.max(1, Math.round(f.size / 1024))} KB`), h("td", { class: "right nowrap" },
+              h("button", { onclick: async () => { try { await api(`${base}/plugins/toggle`, { method: "POST", body: { file: f.file, enabled: !f.enabled } }); drawInstalled(); } catch (e) { toast(e.message, true); } } }, f.enabled ? "Turn off" : "Turn on"), " ",
+              h("button", { class: "danger", onclick: async () => { if (!confirm(`Delete ${f.file.replace(/\.disabled$/, "")}? This can't be undone.`)) return; try { await api(`${base}/plugins/delete`, { method: "POST", body: { file: f.file } }); drawInstalled(); } catch (e) { toast(e.message, true); } } }, "Delete"))))))
+      );
+    } catch (e) {
+      installed.replaceChildren(h("div", { class: "error" }, e.message));
+    }
+  }
+
+  // Modrinth
+  const q = h("input", { placeholder: `Search ${kindWord}s (leave blank for the most popular)`, autocomplete: "off" });
+  const results = h("div", {});
+  const search = async () => {
+    results.replaceChildren(h("p", { class: "muted" }, "Searching…"));
+    try {
+      const r = await api(`${base}/modrinth/search?q=${encodeURIComponent(q.value)}`);
+      results.replaceChildren(
+        h("p", { class: "muted" }, r.gameVersion ? `Showing ${kindWord}s that work with Minecraft ${r.gameVersion}.` : "Console doesn't know this server's Minecraft version, so results aren't filtered by version."),
+        ...r.hits.map((x) => h("div", { class: "row spread" }, h("div", { class: "grow" }, h("b", {}, x.title), h("div", { class: "muted" }, x.description)), h("button", { class: "primary", onclick: async (e) => {
+          e.target.disabled = true;
+          try { const i = await api(`${base}/modrinth/install`, { method: "POST", body: { slug: x.slug } }); toast(`Installed ${i.file}`); drawInstalled(); } catch (err) { toast(err.message, true); e.target.disabled = false; }
+        } }, "Install")))
+      );
+    } catch (e) {
+      results.replaceChildren(h("div", { class: "error" }, e.message));
+    }
+  };
+  modrinth.append(h("form", { class: "row", onsubmit: (e) => (e.preventDefault(), search()) }, q, h("button", { type: "submit" }, "Search")), results);
+
+  // GitHub
+  let org = "";
+  try { org = (await api("/settings")).githubOrg ?? ""; } catch { /* leave blank */ }
+  const owner = h("input", { value: org, placeholder: "your-org or username", autocomplete: "off", spellcheck: "false" });
+  const repoIn = h("input", { placeholder: "owner/repo", autocomplete: "off", spellcheck: "false" });
+  const ghOut = h("div", {});
+  async function showRelease(repo, into) {
+    into.replaceChildren(h("span", { class: "muted" }, "Looking up the latest release…"));
+    try {
+      const r = await api(`/github/releases?repo=${encodeURIComponent(repo)}`);
+      into.replaceChildren(
+        h("div", { class: "muted" }, `Latest release ${r.tag}`),
+        r.assets.length === 0 ? h("div", { class: "muted" }, "No .jar files attached to that release.") : h("div", {}, ...r.assets.map((a) => h("div", { class: "row" }, h("code", {}, a.name), !a.likely && h("span", { class: "tag" }, "probably not the plugin"), h("button", { class: "primary", onclick: async (e) => {
+          e.target.disabled = true;
+          try { const i = await api(`${base}/github/install`, { method: "POST", body: { repo, assetId: a.id } }); toast(`Installed ${i.file}`); drawInstalled(); } catch (err) { toast(err.message, true); e.target.disabled = false; }
+        } }, "Install"))))
+      );
+    } catch (e) {
+      into.replaceChildren(h("div", { class: "error" }, e.message));
+    }
+  }
+  github.append(
+    h("p", { class: "muted" }, "Uses your GitHub token from Settings, so private repos in your team work too."),
+    h("form", { class: "row", onsubmit: async (e) => {
+      e.preventDefault();
+      ghOut.replaceChildren(h("p", { class: "muted" }, "Loading repos…"));
+      try {
+        const repos = await api(`/github/repos?owner=${encodeURIComponent(owner.value.trim())}`);
+        ghOut.replaceChildren(...repos.map((r) => { const slot = h("div", {}); return h("div", { class: "panel" }, h("div", { class: "row spread" }, h("div", {}, h("b", {}, r.name), r.private && h("span", { class: "tag" }, "private"), h("div", { class: "muted" }, r.description ?? "")), h("button", { onclick: () => showRelease(r.full, slot) }, "Latest release")), slot); }));
+        if (!repos.length) ghOut.replaceChildren(h("p", { class: "muted" }, "No repositories found."));
+      } catch (err) { ghOut.replaceChildren(h("div", { class: "error" }, err.message)); }
+    } }, owner, h("button", { type: "submit" }, "List repos")),
+    h("form", { class: "row", onsubmit: (e) => { e.preventDefault(); const slot = h("div", {}); ghOut.prepend(slot); showRelease(repoIn.value.trim(), slot); } }, repoIn, h("button", { type: "submit" }, "Look up a repo")),
+    ghOut
+  );
+  drawInstalled();
+}

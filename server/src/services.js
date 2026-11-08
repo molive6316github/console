@@ -8,7 +8,7 @@ import { createScheduler } from "./scheduler.js";
 import os from "node:os";
 import { createJobs } from "./jobs.js";
 import { createSetups } from "./setups/index.js";
-import { getServer } from "./db.js";
+import { getServer, getSetting } from "./db.js";
 import { createTerminal } from "./terminal.js";
 import { createLinuxUsers } from "./linuxusers.js";
 import { createMc } from "./mc/index.js";
@@ -29,7 +29,6 @@ export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverO
   const monitor = createMonitor({ db, notifier, getStatus: (s) => runtime.status(s), now, sampler });
   const scheduler = createScheduler({ db, runtime, now });
   const jobs = createJobs();
-  const mc = createMc({ runtime });
   const terminal = createTerminal({ db, ...terminalOptions });
   const linux = createLinuxUsers({ selfUser: setupOptions.user ?? os.userInfo().username, ...linuxOptions });
   const setups = createSetups({
@@ -47,6 +46,7 @@ export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverO
     restartServer: (id, actor) => runtime.perform(getServer(db, id), "restart", actor),
     ...setupOptions,
   });
+  const mc = createMc({ runtime, fetchImpl, getToken: () => getSetting(db, "github_token", "") || "", getMeta: (id) => setups.metaOf(id) });
   return {
     runtime,
     discover,

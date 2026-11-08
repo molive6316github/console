@@ -36,7 +36,7 @@ export function setupRoutes(app, { db, need, setups, jobs, safeMode }) {
   }));
   app.get("/api/servers/:id/git", { preHandler: need("admin") }, async (req) => {
     const m = setups.metaOf(req.params.id);
-    return m ? { repo: m.repo, branch: m.branch, kind: m.kind } : null;
+    return m?.repo ? { repo: m.repo, branch: m.branch, kind: m.kind } : null;
   });
 
   app.get("/api/jobs", { preHandler: need("admin") }, async () => jobs.list());
