@@ -19,3 +19,38 @@ export function assertMatch(value, regex, label) {
   }
   return value;
 }
+
+// ---- target validation helpers (used by every driver's validate()) ----------
+export class TargetError extends Error {}
+
+export function pickString(t, key, { re, max = 500, required = false } = {}) {
+  const v = t[key];
+  if (v === undefined || v === null || v === "") {
+    if (required) throw new TargetError(`${key} is required`);
+    return undefined;
+  }
+  if (typeof v !== "string" || v.length > max || v.includes("\0")) throw new TargetError(`${key} is not valid`);
+  if (re && !re.test(v)) throw new TargetError(`${key} is not valid`);
+  return v;
+}
+
+export function pickInt(t, key, min, max) {
+  const v = t[key];
+  if (v === undefined || v === null || v === "") return undefined;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < min || n > max) throw new TargetError(`${key} must be a whole number from ${min} to ${max}`);
+  return n;
+}
+
+export function pickPath(t, key) {
+  const v = pickString(t, key, { max: 1024 });
+  if (v === undefined) return undefined;
+  if (!v.startsWith("/") || v === "/" || v.split("/").includes("..")) {
+    throw new TargetError(`${key} must be an absolute path (not "/") with no ".." in it`);
+  }
+  return v.replace(/\/+$/, "");
+}
+
+export function clean(obj) {
+  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined));
+}

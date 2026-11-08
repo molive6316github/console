@@ -1,4 +1,4 @@
-import { run, assertMatch } from "./exec.js";
+import { run, assertMatch, clean, pickString, pickInt, pickPath } from "./exec.js";
 
 const HOST = /^(?:[a-zA-Z0-9_.-]+@)?[a-zA-Z0-9][a-zA-Z0-9.-]*$/;
 const UNIT = /^[a-zA-Z0-9][a-zA-Z0-9:_.@-]{0,127}$/;
@@ -24,6 +24,14 @@ function remote(target, ...cmd) {
 
 export default {
   type: "systemd",
+  validate: (t) =>
+    clean({
+      host: pickString(t, "host", { re: HOST, max: 255, required: true }),
+      unit: pickString(t, "unit", { re: UNIT, max: 128, required: true }),
+      port: pickInt(t, "port", 1, 65535),
+      sudo: t.sudo === undefined ? undefined : Boolean(t.sudo),
+      keyFile: pickPath(t, "keyFile"),
+    }),
   async status(target) {
     const r = await run("ssh", remote(target, "is-active"), { timeout: 10_000 });
     const out = r.stdout.trim();

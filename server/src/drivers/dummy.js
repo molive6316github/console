@@ -7,8 +7,11 @@ function get(target, key) {
   return k;
 }
 
+import { clean, pickPath } from "./exec.js";
+
 export default {
   type: "dummy",
+  validate: (t) => clean({ startsUp: Boolean(t.startsUp), filesRoot: pickPath(t, "filesRoot") }),
   async status(target, ctx) {
     return state.get(get(target, ctx.id)) ? "up" : "down";
   },
@@ -21,7 +24,7 @@ export default {
   async restart(target, ctx) {
     state.set(get(target, ctx.id), true);
   },
-  async logs() {
-    return "dummy driver: no logs";
+  async logs(target, lines, ctx) {
+    return `[dummy] ${ctx?.id ?? "server"} is a fake server for trying out Console.\n[dummy] Nothing is really running.`;
   },
 };

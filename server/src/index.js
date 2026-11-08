@@ -5,6 +5,7 @@ import { openDb, syncServers } from "./db.js";
 import { ensureAdmin } from "./auth.js";
 import { buildApp } from "./app.js";
 import { updater } from "./updater.js";
+import { createServices } from "./services.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
@@ -49,8 +50,13 @@ const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
 const sha = await updater.current();
 const version = sha ? `${pkg.version} (${sha})` : pkg.version;
 
+const services = createServices({ db, dataDir: path.dirname(DB_FILE) });
+const safeMode = process.env.CONSOLE_SAFE_MODE === "1";
 const app = buildApp({
   db,
+  services,
+  safeMode,
+  dataDir: path.dirname(DB_FILE),
   version,
   secureCookies: process.env.CONSOLE_SECURE_COOKIES === "1",
   logger: process.env.CONSOLE_LOG === "1",
@@ -63,3 +69,9 @@ app.listen({ port: PORT, host: HOST }).then(
     process.exit(1);
   }
 );
+
+// Background work: status checks + alerts + host metrics (CONSOLE_MONITOR_SEC, 0 = off) and the scheduler.
+const monitorSec = parseInt(process.env.CONSOLE_MONITOR_SEC ?? "60", 10);
+services.start({ monitorSec: Number.isFinite(monitorSec) ? monitorSec : 60 });
+if (safeMode) console.log("Safe mode: server editing, the file editor and commands are disabled.");
+

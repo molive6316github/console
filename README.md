@@ -2,7 +2,7 @@
 
 A small web dashboard for starting, stopping and watching all kinds of servers. Every server type is a **driver** behind one tiny interface, so the dashboard doesn't care what's underneath.
 
-**Status: v0.1** (single machine, roles in place, no per-server permissions yet)
+**Status: v0.2**: live logs and commands, add servers from the browser, staff accounts with per-server access, down alerts, host metrics, schedules, a file editor and backups.
 
 ## Quick start
 
@@ -24,20 +24,46 @@ Dev mode with hot reload (two terminals): `npm run dev:server` and `npm run dev:
 
 Tests: `npm test`
 
+## What you can do
+
+| | |
+|---|---|
+| **Servers** | Start / stop / restart, status dots, 24h uptime. |
+| **Console** | Live output (refreshes every 2 seconds) and a command box that types into the server. Works for `tmux` servers (Minecraft etc.); logs also work for Docker and systemd. |
+| **Files** | Edit text files (`server.properties`, configs) in the browser, confined to the server's folder. |
+| **Backups** | One-click `.tar.gz` of the server's folder, automatic pruning, download. |
+| **Schedules** | Cron-style: restart at 4am, back up on Sundays, send `say Restarting soon` at 3:55. |
+| **Alerts** | Discord or Slack webhook when a server that should be up goes down, and when it recovers. |
+| **Host** | CPU, memory and disk now and over 1h / 6h / 24h / 7d. |
+| **Users** | Staff accounts, each limited to the servers you pick. |
+| **Audit log** | Every login, action, command, file edit and settings change. |
+
 ## Defining servers
 
-`servers.json` is the source of truth and is synced into the database on every start. See `servers.example.json` for one of each type.
+Two ways, and you can mix them:
+
+- **In the browser:** **Add server** on the Servers page (admins). These can be edited and removed in the UI.
+- **In `servers.json`:** the file is synced into the database on every start. These servers are read-only in the UI ("edit it in servers.json"). Removing one from the file removes it from Console. Servers you added in the browser are never touched by the file.
+
+See `servers.example.json` for one of each type.
 
 | type | what it does | target |
 |---|---|---|
 | `docker` | start/stop/restart a container | `{ "container": "name" }` |
 | `systemd` | systemd unit on any Linux box over SSH | `{ "host": "user@host", "unit": "nginx.service", "sudo": true }` |
-| `tmux` | long-running process in a tmux session (game servers) | `{ "session", "startCommand", "cwd", "stopCommand" }` |
+| `tmux` | long-running process in a tmux session (game servers) | `{ "session", "startCommand", "cwd", "stopCommand", "stopTimeoutSec" }` |
 | `http` | read-only "is this site alive?" | `{ "url", "expectStatus" }` |
 | `dummy` | fake, for development | `{ "startsUp": true }` |
 
 `systemd` needs key-based SSH (and passwordless sudo if `sudo` is true).
 `tmux` with a `stopCommand` (e.g. `stop` for Minecraft) asks the process to exit nicely, waits, then force-kills.
+
+**Files and backups** work on any server with a folder on this machine: set `filesRoot` (docker, dummy) or `cwd` / `filesRoot` (tmux). `systemd` (remote) and `http` servers have no local folder, so they don't get those tabs.
+
+```json
+{ "id": "survival", "name": "Survival SMP", "type": "tmux",
+  "target": { "session": "survival", "cwd": "/srv/survival", "startCommand": "java -Xmx4G -jar server.jar nogui", "stopCommand": "stop" } }
+```
 
 ## Adding a driver
 
@@ -48,21 +74,32 @@ Drop a file in `server/src/drivers/`, export an object with `type`, `status`, `s
   type: "mything",
   status(target, ctx)  -> "up" | "down" | "unknown",
   start(target, ctx), stop(target, ctx), restart(target, ctx),
-  logs(target, lines)  // stubbed in v0.1
+  logs(target, lines, ctx) -> string,
+  validate(target) -> cleaned target   // used when servers are added in the UI; throw TargetError on bad input
+  send(target, text)                   // optional: type a line into the server
 }
 ```
 
-## Roles
+## Roles and access
 
 | role | can do |
 |---|---|
-| `viewer` | see status |
-| `operator` | + start / stop / restart |
-| `admin` | + read the audit log, update Console |
+| `viewer` | see status and logs |
+| `operator` | + start / stop / restart, send commands |
+| `admin` | + everything else: add/edit servers, files, backups, schedules, users, settings, audit log, updates |
 
-Everyone can change their own password (**Account** button, 10+ characters). Changing it signs out that user's other sessions. Forgot the admin password? Stop the service, delete `data/console.db*`, set `CONSOLE_ADMIN_PASSWORD`, start it again. That wipes users and the audit log.
+Each non-admin user is either allowed **all servers** or **only the ones you pick**. A server they can't access doesn't show up for them and answers "no such server" if they guess its address. Scoped users also don't see the Host page (machine-wide numbers).
 
-Every login and every action is written to the audit log (who, what, which server, success or failure).
+Changing a user's role, servers or password signs them out immediately. You can't delete or demote yourself, and the last admin can't be removed.
+
+Everyone can change their own password (**Account**, 10+ characters). Forgot the admin password? Stop the service, delete `data/console.db*`, set `CONSOLE_ADMIN_PASSWORD`, start it again. That wipes users, schedules, history and the audit log (servers from `servers.json` come back; servers added in the browser do not).
+
+## Alerts, schedules, metrics
+
+- **Alerts:** Settings → paste a Discord (or Slack) webhook URL → Send test alert. Console checks every server once a minute. A server that has been seen running and is then down for 2 checks in a row triggers one message, and one more when it's back. **Stopping a server from Console, or from a schedule, never alerts.** The webhook is stored in the database and is never shown in full again.
+- **Schedules:** `minute hour day-of-month month day-of-week`, in the time zone you set under Settings (the server is usually on UTC, so set yours). Each runs at most once a minute. If Console was off at that minute, that run is skipped. An action already in progress on the same server makes the scheduled one skip rather than pile up.
+- **Backups:** `tar` of the server's folder. For a live Minecraft world, schedule a command like `save-all` a minute before the backup, or stop it first. Restoring is manual: download, unpack. Older backups are deleted automatically (default keep 7, Settings).
+- **Metrics:** CPU, memory and disk of this machine, sampled every minute, kept for 7 days. Per-server uptime is the share of checks in the last 24 hours that found it running.
 
 ## Deploying publicly (Oracle Cloud / any VPS)
 
@@ -129,13 +166,16 @@ Notes:
 
 ## Security notes
 
+- **An admin account can run commands on this machine.** Adding a `tmux` server lets you set its start command, the command box types into a shell-capable process, and the file editor can change a start script. That is the point of the tool, but it means an admin password is as sensitive as an SSH key. Operators can send commands to servers they can access but can't change what runs.
+- **Safe mode** (`CONSOLE_SAFE_MODE=1`) turns off adding/editing servers in the UI, the file editor, and sending commands (including scheduled commands). Servers in `servers.json` and start/stop/restart still work. Use it if you'd rather define servers only by editing the file.
 - Binds to `127.0.0.1` by default; the section above is the supported way to expose it. If you set `HOST=0.0.0.0` anyway, it prints a warning unless `CONSOLE_SECURE_COOKIES=1`.
 - Only set `CONSOLE_TRUST_PROXY=1` when a proxy you control sits in front, otherwise clients can fake their IP and dodge the login rate limit.
 - Responses carry CSP, `X-Frame-Options: DENY`, `nosniff`, and HSTS (when secure cookies are on).
-- Server targets (hosts, commands, paths) never leave the backend.
-- Drivers run commands without a shell, and every name that reaches a command line is regex-validated.
-- Only whoever can edit `servers.json` can define what runs. There is no way to add servers or commands through the web UI.
-- Passwords are scrypt-hashed, sessions are random tokens stored hashed, cookies are `HttpOnly` + `SameSite=Strict`, login is rate limited.
+- Server targets (hosts, commands, paths) never reach non-admins; admins only see them on a UI-added server's edit screen.
+- The file editor is confined to the server's folder: `..`, absolute paths and symlinks that point outside are refused, saves are atomic, and it won't overwrite a file that changed since you opened it. Binary files and anything over 512 KB can't be opened.
+- Drivers run commands without a shell, and every name that reaches a command line is regex-validated. Commands you type go into tmux as literal text.
+- Passwords are scrypt-hashed, sessions are random tokens stored hashed, cookies are `HttpOnly` + `SameSite=Strict`, login is rate limited, and every state-changing request must be JSON.
+- Webhook URLs must be `https://` and can't point at private or local addresses.
 
 ## Environment variables
 
@@ -150,12 +190,13 @@ Notes:
 | `CONSOLE_TRUST_PROXY` | off |
 | `CONSOLE_LOG` | off (`1` for request logs) |
 | `CONSOLE_UPDATE_BRANCH` | `main` |
+| `CONSOLE_SAFE_MODE` | off (`1` disables UI server editing, file editor, commands) |
+| `CONSOLE_MONITOR_SEC` | `60` (how often to check servers / sample metrics / alert; `0` = off) |
 
 ## Roadmap
 
-- **v0.2 staff:** user management UI, per-server permissions, logs viewer
-- **v0.3 open source:** setup script, Dockerfile, screenshots, license
-- Later: metrics, file browser, notifications when something goes down
+- Next: Dockerfile, per-server CPU/RAM (docker stats), email alerts, restoring a backup from the UI, two-factor login
+- **v0.3 open source:** screenshots, license, contribution guide
 
 ## License
 

@@ -1,10 +1,12 @@
-import { run, assertMatch } from "./exec.js";
+import { run, assertMatch, clean, pickString, pickPath } from "./exec.js";
 
 const NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 
 // target: { container: "name-or-id" }
 export default {
   type: "docker",
+  validate: (t) =>
+    clean({ container: pickString(t, "container", { re: NAME, max: 128, required: true }), filesRoot: pickPath(t, "filesRoot") }),
   async status(target) {
     const c = assertMatch(target.container, NAME, "container name");
     const r = await run("docker", ["inspect", "-f", "{{.State.Running}}", c]);

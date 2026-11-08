@@ -33,7 +33,7 @@ export function userFromToken(db, token) {
   if (!token) return null;
   const row = db
     .prepare(
-      `SELECT u.id, u.username, u.role, s.expires_at FROM sessions s
+      `SELECT u.id, u.username, u.role, u.all_servers, s.expires_at FROM sessions s
        JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`
     )
     .get(sha(token));
@@ -42,7 +42,7 @@ export function userFromToken(db, token) {
     db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(sha(token));
     return null;
   }
-  return { id: row.id, username: row.username, role: row.role };
+  return { id: row.id, username: row.username, role: row.role, allServers: row.all_servers === 1 };
 }
 
 // Sets a new password and signs out every session of that user except keepToken (the one making the change).
@@ -86,4 +86,9 @@ export function recordLoginFailure(ip) {
 }
 export function clearLoginFailures(ip) {
   failures.delete(ip);
+}
+
+// Ends every session of a user (used when an admin changes their role, scope or password).
+export function destroyUserSessions(db, userId) {
+  db.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
 }

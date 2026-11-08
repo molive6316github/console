@@ -241,7 +241,8 @@ install_base() {
   local missing=()
   command -v git  >/dev/null 2>&1 || missing+=(git)
   command -v tmux >/dev/null 2>&1 || missing+=(tmux)
-  if [ "${#missing[@]}" -gt 0 ]; then pkg_install "${missing[@]}"; ok "Installed ${missing[*]}"; else ok "git and tmux are present"; fi
+  command -v tar  >/dev/null 2>&1 || missing+=(tar) # backups
+  if [ "${#missing[@]}" -gt 0 ]; then pkg_install "${missing[@]}"; ok "Installed ${missing[*]}"; else ok "git, tmux and tar are present"; fi
 
   if node_ok; then
     ok "Node $(node -v) is present"
