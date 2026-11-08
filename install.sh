@@ -15,6 +15,7 @@
 #   --port N        port Console listens on (default 3000)
 #   --branch NAME   git branch to install from (default main)
 #   --dir PATH      where to install (default /opt/console)
+#   --user NAME     Linux user Console runs as (default: the user who ran sudo, e.g. opc; else a new 'console' user)
 #   --yes           never ask questions
 # Environment
 #   CF_API_TOKEN              Cloudflare token (Zone:Read + DNS:Edit). Used once, never stored or printed.
@@ -31,7 +32,8 @@ BRANCH="${CONSOLE_BRANCH:-main}"
 PORT_FLAG="${CONSOLE_PORT:-}"
 DOMAIN="${CONSOLE_DOMAIN:-}"
 ENV_FILE="${CONSOLE_ENV_FILE:-/etc/console.env}"
-SVC_USER="console"
+SVC_USER=""
+USER_FLAG="${CONSOLE_USER:-}"
 CADDY_DIR="/etc/caddy"
 
 IP_ONLY=0
@@ -70,6 +72,7 @@ Console installer. Run as root; safe to repeat.
   --port N        port Console listens on (default 3000)
   --branch NAME   git branch to install from (default main)
   --dir PATH      where to install (default /opt/console)
+  --user NAME     Linux user Console runs as (default: you, the user who ran sudo)
   --yes           never ask questions
 EOF
 }
@@ -136,6 +139,8 @@ write_env() {
     env_del CONSOLE_TRUST_PROXY
     env_del CONSOLE_DOMAIN
   fi
+  [ -z "$SVC_USER" ] || env_set CONSOLE_RUN_USER "$SVC_USER"
+  [ -z "$PUBLIC_IP" ] || env_set CONSOLE_PUBLIC_IP "$PUBLIC_IP"
   if [ "$BRANCH" = main ]; then env_del CONSOLE_UPDATE_BRANCH; else env_set CONSOLE_UPDATE_BRANCH "$BRANCH"; fi
 }
 
@@ -149,11 +154,25 @@ $1 {
 EOF
 }
 
-render_unit() { # node_bin dir env_file
+# The unit for a given user. A normal login user (like opc) also needs sudo for system services and Linux-user
+# management, and NoNewPrivileges would block that, so it is only kept for the locked-down 'console' user.
+render_unit() { # node_bin dir env_file [user]
+  local user=${4:-console}
   sed -e "s|^ExecStart=.*|ExecStart=$1 server/src/index.js|" \
       -e "s|^WorkingDirectory=.*|WorkingDirectory=$2|" \
       -e "s|^EnvironmentFile=.*|EnvironmentFile=$3|" \
-      "$2/deploy/console.service"
+      -e "s|^User=.*|User=$user|" \
+      "$2/deploy/console.service" | { if [ "$user" = console ]; then cat; else grep -v '^NoNewPrivileges='; fi; }
+}
+
+valid_username() { [[ $1 =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] && [ "$1" != root ]; }
+
+# Who Console runs as: --user/CONSOLE_USER, else what was used last time, else whoever ran sudo, else 'console'.
+pick_user() {
+  local u="$USER_FLAG"
+  [ -n "$u" ] || u=$(env_get CONSOLE_RUN_USER)
+  if [ -z "$u" ] && [ -n "${SUDO_USER:-}" ] && valid_username "$SUDO_USER" && id "$SUDO_USER" >/dev/null 2>&1; then u="$SUDO_USER"; fi
+  SVC_USER=${u:-console}
 }
 
 parse_args() {
@@ -165,6 +184,7 @@ parse_args() {
       --port)     [ $# -ge 2 ] || die "--port needs a value"; PORT_FLAG="$2"; shift 2 ;;
       --branch)   [ $# -ge 2 ] || die "--branch needs a value"; BRANCH="$2"; shift 2 ;;
       --dir)      [ $# -ge 2 ] || die "--dir needs a value"; DIR="$2"; shift 2 ;;
+      --user)     [ $# -ge 2 ] || die "--user needs a value"; USER_FLAG="$2"; shift 2 ;;
       --yes|-y)   ASSUME_YES=1; shift ;;
       -h|--help)  usage; exit 0 ;;
       *)          die "Unknown option: $1 (try --help)" ;;
@@ -178,6 +198,7 @@ parse_args() {
     [[ $PORT_FLAG =~ ^[0-9]+$ ]] && [ "$PORT_FLAG" -ge 1 ] && [ "$PORT_FLAG" -le 65535 ] || die "Bad port: $PORT_FLAG"
   fi
   [[ $BRANCH =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || die "Bad branch name: $BRANCH"
+  [ -z "$USER_FLAG" ] || valid_username "$USER_FLAG" || die "Bad user name: $USER_FLAG"
   [[ $DIR =~ ^/[A-Za-z0-9._/-]+$ ]] || die "--dir must be an absolute path with simple characters: $DIR"
 }
 
@@ -261,11 +282,13 @@ install_base() {
 }
 
 ensure_user() {
+  pick_user
   if ! id "$SVC_USER" >/dev/null 2>&1; then
+    [ "$SVC_USER" = console ] || die "The user '$SVC_USER' doesn't exist on this machine."
     useradd --system --create-home --shell /bin/bash "$SVC_USER"
     ok "Created user '$SVC_USER'"
   else
-    ok "User '$SVC_USER' exists"
+    ok "Console will run as '$SVC_USER'"
   fi
   SVC_HOME=$(getent passwd "$SVC_USER" | cut -d: -f6)
 }
@@ -274,7 +297,7 @@ as_svc() { runuser -u "$SVC_USER" -- env HOME="$SVC_HOME" "$@"; }
 
 fetch_code() {
   if [ -d "$DIR/.git" ]; then
-    chown -R "$SVC_USER:$SVC_USER" "$DIR"
+    chown -R "$SVC_USER:$(id -gn "$SVC_USER")" "$DIR"
     local before after cur
     before=$(as_svc git -C "$DIR" rev-parse --short HEAD)
     cur=$(as_svc git -C "$DIR" rev-parse --abbrev-ref HEAD)
@@ -288,7 +311,7 @@ fetch_code() {
   elif [ -n "$(ls -A "$DIR" 2>/dev/null || true)" ]; then
     die "$DIR exists but isn't a Console checkout. Move it away or choose another place with --dir."
   else
-    mkdir -p "$DIR"; chown "$SVC_USER:$SVC_USER" "$DIR"
+    mkdir -p "$DIR"; chown "$SVC_USER:$(id -gn "$SVC_USER")" "$DIR"
     as_svc env GIT_TERMINAL_PROMPT=0 git clone --quiet --branch "$BRANCH" "$REPO" "$DIR" \
       || die "Couldn't download Console from $REPO"
     ok "Downloaded Console"
@@ -331,7 +354,7 @@ wait_for() { # url seconds: 0 once the URL answers with any HTTP status
 }
 
 install_service() {
-  render_unit "$(command -v node)" "$DIR" "$ENV_FILE" > /etc/systemd/system/console.service
+  render_unit "$(command -v node)" "$DIR" "$ENV_FILE" "$SVC_USER" > /etc/systemd/system/console.service
   systemctl daemon-reload
   systemctl enable console >/dev/null 2>&1
   systemctl restart console
@@ -465,6 +488,13 @@ configure_caddy() {
   local main="$CADDY_DIR/Caddyfile" line="import $CADDY_DIR/console.caddy"
   [ -f "$main" ] || : > "$main"
   grep -qxF "$line" "$main" || printf '\n%s\n' "$line" >> "$main"
+  # Websites made with Console's one-click "Website" setup live here, one small file each. Console can write
+  # this folder (it is owned by the Console user) and asks Caddy to reload with sudo.
+  mkdir -p "$CADDY_DIR/sites" /srv/sites
+  chown "$SVC_USER:$(id -gn "$SVC_USER")" "$CADDY_DIR/sites" /srv/sites
+  [ -e "$CADDY_DIR/sites/00-readme.caddy" ] || printf '# Sites created by Console go in this folder.\n' > "$CADDY_DIR/sites/00-readme.caddy"
+  local sites="import $CADDY_DIR/sites/*.caddy"
+  grep -qxF "$sites" "$main" || printf '%s\n' "$sites" >> "$main"
   if ! caddy validate --config "$main" --adapter caddyfile >/dev/null 2>&1; then
     caddy validate --config "$main" --adapter caddyfile >&2 || true
     die "Caddy didn't accept the generated config (shown above)."

@@ -97,6 +97,28 @@ test("render_unit keeps the restart behaviour the updater relies on and swaps in
   assert.match(out, /^Restart=on-failure$/m);
   assert.match(out, /^KillMode=process$/m);
   assert.match(out, /^User=console$/m);
+  assert.match(out, /^NoNewPrivileges=true$/m);
+});
+
+test("render_unit for a login user like opc drops NoNewPrivileges so sudo works", () => {
+  const out = sh(`render_unit /usr/bin/node ${root} /etc/console.env opc`).out;
+  assert.match(out, /^User=opc$/m);
+  assert.doesNotMatch(out, /NoNewPrivileges/);
+  assert.match(out, /^KillMode=process$/m);
+});
+
+test("pick_user: flag beats saved beats sudo caller beats console; bad names are refused", () => {
+  const e = envFile("CONSOLE_RUN_USER=saveduser\n");
+  const pick = (pre, extra = {}) => sh(`${pre}; pick_user; echo "$SVC_USER"`, { CONSOLE_ENV_FILE: e.file, ...extra }).out.trim();
+  assert.equal(pick(`USER_FLAG=flaguser`), "flaguser");
+  assert.equal(pick(`USER_FLAG=""`), "saveduser");
+  const e2 = envFile("");
+  const pick2 = (extra) => sh(`USER_FLAG=""; pick_user; echo "$SVC_USER"`, { CONSOLE_ENV_FILE: e2.file, ...extra }).out.trim();
+  assert.equal(pick2({ SUDO_USER: "root" }), "console");
+  assert.equal(pick2({ SUDO_USER: "" }), "console");
+  assert.equal(sh(`valid_username 'a b'`).code === 0, false);
+  assert.equal(sh(`valid_username 'root'`).code === 0, false);
+  assert.equal(sh(`valid_username 'opc'`).code, 0);
 });
 
 test("parse_args accepts good input", () => {

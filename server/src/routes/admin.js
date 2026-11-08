@@ -43,6 +43,7 @@ export function adminRoutes(app, { db, need, runtime, notifier, scheduler, safeM
     return {
       alertWebhook: maskWebhook(hook),
       alertsConfigured: Boolean(hook),
+      githubToken: getSetting(db, "github_token", "") ? "••••" + String(getSetting(db, "github_token")).slice(-4) : "",
       timezone: defaultTimezone(db),
       backupKeep: Math.min(Math.max(parseInt(getSetting(db, "backup_keep", "7"), 10) || 7, 1), 50),
     };
@@ -59,6 +60,11 @@ export function adminRoutes(app, { db, need, runtime, notifier, scheduler, safeM
       if (bad) return reply.code(400).send({ error: bad });
       setSetting(db, "alert_webhook", url);
     }
+    if (b.githubToken !== undefined) {
+      const t = typeof b.githubToken === "string" ? b.githubToken.trim() : null;
+      if (t === null || t.length > 255 || /\s/.test(t)) return reply.code(400).send({ error: "That doesn't look like a GitHub token" });
+      setSetting(db, "github_token", t);
+    }
     if (b.timezone !== undefined) {
       if (typeof b.timezone !== "string" || !validTimezone(b.timezone)) return reply.code(400).send({ error: "Unknown time zone (use a name like America/New_York)" });
       setSetting(db, "timezone", b.timezone);
@@ -68,7 +74,7 @@ export function adminRoutes(app, { db, need, runtime, notifier, scheduler, safeM
       if (!Number.isInteger(n) || n < 1 || n > 50) return reply.code(400).send({ error: "Keep between 1 and 50 backups" });
       setSetting(db, "backup_keep", n);
     }
-    audit(db, { username: req.user.username, action: "settings", ok: true, detail: Object.keys(b).join(", ") });
+    audit(db, { username: req.user.username, action: "settings", ok: true, detail: Object.keys(b).join(", ") }); // names only, never values
     return settingsView();
   });
 

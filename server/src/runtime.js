@@ -23,7 +23,7 @@ export function withTimeout(promise, ms, label) {
 // Where a server's files live on THIS machine (editor + backups). Not available for remote servers.
 export function filesRootOf(server) {
   const t = server.target ?? {};
-  if (server.type === "systemd" || server.type === "http") return null;
+  if (server.type === "systemd") return null;
   return t.filesRoot || (server.type === "tmux" ? t.cwd : null) || null;
 }
 

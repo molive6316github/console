@@ -11,6 +11,7 @@ import { createServices } from "./services.js";
 import { serverRoutes } from "./routes/servers.js";
 import { adminRoutes } from "./routes/admin.js";
 import { discoverRoutes } from "./routes/discover.js";
+import { setupRoutes } from "./routes/setup.js";
 import {
   verifyPassword,
   createSession,
@@ -185,6 +186,15 @@ export function buildApp({
   serverRoutes(app, ctx);
   adminRoutes(app, ctx);
   discoverRoutes(app, { ...ctx, discover: services.discover });
+  setupRoutes(app, { ...ctx, setups: services.setups, jobs: services.jobs });
+
+  // Restart Console (admin). Under systemd it comes straight back; elsewhere it just says so.
+  app.post("/api/restart", { preHandler: need("admin") }, async (req) => {
+    audit(db, { username: req.user.username, action: "restart", ok: true });
+    const restarting = canRestart();
+    if (restarting) setTimeout(onRestart, restartDelayMs);
+    return { restarting };
+  });
 
   // ---- built frontend (after `npm run build`) -----------------------------
   const dist = path.resolve(here, "../../web/dist");

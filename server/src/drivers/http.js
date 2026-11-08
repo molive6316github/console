@@ -1,6 +1,6 @@
 // Read-only: "is this site alive?"
 // target: { url: "https://...", expectStatus?: 200, timeoutMs?: 4000 }
-import { clean, pickString, pickInt, TargetError } from "./exec.js";
+import { clean, pickString, pickInt, pickPath, TargetError } from "./exec.js";
 
 export default {
   type: "http",
@@ -11,7 +11,7 @@ export default {
     let u;
     try { u = new URL(url); } catch { throw new TargetError("url is not valid"); }
     if (u.protocol !== "http:" && u.protocol !== "https:") throw new TargetError("url must start with http:// or https://");
-    return clean({ url, expectStatus: pickInt(t, "expectStatus", 100, 599), timeoutMs: pickInt(t, "timeoutMs", 500, 30000) });
+    return clean({ url, expectStatus: pickInt(t, "expectStatus", 100, 599), timeoutMs: pickInt(t, "timeoutMs", 500, 30000), filesRoot: pickPath(t, "filesRoot") });
   },
   async status(target) {
     let url;
