@@ -53,6 +53,7 @@ SCRIPTS_DIR=""
 DOCKER_NAME=""
 DOCKER_REMOVE=""
 DOCKER_PURGE=0
+UNINSTALL=0
 DOCKER_SRC="${CONSOLE_DOCKER_SRC:-/opt/console-docker/src}"
 DOCKER_ENV_DIR="${CONSOLE_DOCKER_ENV_DIR:-/etc/console-docker}"
 DOCKER_IMAGE="console:local"
@@ -110,6 +111,7 @@ Console installer. Run as root; safe to repeat.
   --minecraft     set this machine up as a Minecraft host (--standard turns that off)
   --reconfigure   run the setup wizard again on an existing install
   --docker [NAME] an isolated Console in Docker (own data, own port; side by side with the main one)
+  --uninstall                      remove Console itself (service, HTTPS site, its settings and accounts; game worlds are kept)
   --docker-remove NAME [--purge]   remove a Docker instance (--purge also deletes its data)
   --yes           never ask questions
 EOF
@@ -232,6 +234,7 @@ parse_args() {
                   if [ $# -gt 0 ] && [[ $1 != -* ]]; then DOCKER_NAME="$1"; shift; fi ;;
       --docker-remove) [ $# -ge 2 ] || die "--docker-remove needs a name"; DOCKER_REMOVE="$2"; shift 2 ;;
       --purge)    DOCKER_PURGE=1; shift ;;
+      --uninstall) UNINSTALL=1; shift ;;
       --yes|-y)   ASSUME_YES=1; shift ;;
       -h|--help)  usage; exit 0 ;;
       *)          die "Unknown option: $1 (try --help)" ;;
@@ -1223,6 +1226,27 @@ print_summary() {
 
 # ---- main ----------------------------------------------------------------------------------
 
+uninstall_main() {
+  [ -f /etc/systemd/system/console.service ] || [ -d "$DIR" ] || die "Console doesn't look installed here (no console service and no $DIR)."
+  echo
+  warn "This removes Console: its service, its web address (HTTPS site), $DIR (accounts, settings, audit log) and $ENV_FILE."
+  info "Game servers and worlds under ~/servers are NOT touched, and neither are Docker instances (use --docker-remove for those)."
+  local a; a=$(ask "  Type delete to remove Console: ")
+  [ "$a" = delete ] || die "Cancelled. Nothing was changed."
+  systemctl disable --now console >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/console.service
+  systemctl daemon-reload || true
+  if [ -f "$CADDY_DIR/console.caddy" ]; then
+    rm -f "$CADDY_DIR/console.caddy"
+    sed -i "\#^import $CADDY_DIR/console.caddy\$#d" "$CADDY_DIR/Caddyfile" 2>/dev/null || true
+    if systemctl is-active --quiet caddy; then systemctl reload caddy || true; fi
+  fi
+  rm -f "$ENV_FILE"
+  case "$DIR" in /|/opt|/usr|/home|/root|"") die "Refusing to delete $DIR" ;; esac
+  rm -rf "$DIR"
+  ok "Console is removed. To put it back: sudo npx -y mxt-console@latest install"
+}
+
 main() {
   # The script may be arriving on stdin (curl | bash). Make sure no command below can swallow the rest of it.
   exec </dev/null
@@ -1238,9 +1262,10 @@ main() {
   find_public_ip || warn "Couldn't look up this server's public IP."
 
   # Someone at the keyboard with no flags gets the choice, even on a machine that's already installed.
-  if [ "$HAVE_TTY" -eq 1 ] && [ "$DOCKER_MODE" -eq 0 ] && [ -z "$DOCKER_REMOVE" ] && [ "$RECONFIGURE" -eq 0 ] && [ -z "$DOMAIN" ] && [ "$IP_ONLY" -eq 0 ]; then
+  if [ "$HAVE_TTY" -eq 1 ] && [ "$DOCKER_MODE" -eq 0 ] && [ -z "$DOCKER_REMOVE" ] && [ "$UNINSTALL" -eq 0 ] && [ "$RECONFIGURE" -eq 0 ] && [ -z "$DOMAIN" ] && [ "$IP_ONLY" -eq 0 ]; then
     pick_target
   fi
+  if [ "$UNINSTALL" -eq 1 ]; then uninstall_main; return 0; fi
   if [ -n "$DOCKER_REMOVE" ]; then docker_remove; return 0; fi
   if [ "$DOCKER_MODE" -eq 1 ]; then docker_main; return 0; fi
   [ -d /run/systemd/system ] || die "This needs a Linux with systemd (Oracle Linux, Ubuntu, Debian, ...)."

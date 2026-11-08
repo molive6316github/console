@@ -15,7 +15,7 @@ const HELP = `mxt-console ${pkg.version}: a web dashboard for starting, stopping
   npx mxt-console                    run the dashboard on http://127.0.0.1:3000 (data in ~/.mxt-console)
   npx mxt-console start [--port N] [--host H] [--data DIR]
   sudo npx mxt-console install [...]  install as a service with HTTPS, firewall and a guided setup
-                                       (same options as install.sh: --minecraft, --domain NAME, --reconfigure ...)
+                                       (same options as install.sh: --minecraft, --domain NAME, --reconfigure, --uninstall ...)
   sudo npx mxt-console docker [NAME]  create an isolated Console in a Docker container
   npx mxt-console --version | --help
 
