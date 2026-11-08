@@ -7,7 +7,7 @@ import { parseTps } from "../mc/stats.js";
 const TTL = 10_000;
 const DOMAIN = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
 
-export function statusRoutes(app, { db, need, allow, mc, startup, stats, setups, jobs, safeMode, golive, offsite }) {
+export function statusRoutes(app, { db, need, allow, mc, startup, stats, setups, jobs, safeMode, golive, diagnose, offsite }) {
   const jobServer = new Map(); // job id -> server id, so people with 'versions' only see this server's jobs
   const cfg = () => {
     try { return { enabled: false, names: false, ...JSON.parse(getSetting(db, "public_status", "{}")) }; } catch { return { enabled: false, names: false }; }
@@ -136,6 +136,8 @@ export function statusRoutes(app, { db, need, allow, mc, startup, stats, setups,
     return { ok: true };
   }));
   void safeMode;
+
+  app.get("/api/servers/:id/mc/diagnose", { preHandler: [need("admin"), scoped] }, wrap(async (req) => diagnose.diagnose(req.srv)));
 
   // ---- go-live checklist ----
   app.get("/api/servers/:id/mc/golive", { preHandler: [need("admin"), scoped] }, wrap(async (req) => golive.checks(req.srv)));

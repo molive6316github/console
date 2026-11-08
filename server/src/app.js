@@ -285,7 +285,7 @@ export function buildApp({
   setupRoutes(app, { ...ctx, setups: services.setups, jobs: services.jobs });
   terminalRoutes(app, { ...ctx, terminal: services.terminal });
   mcRoutes(app, { ...ctx, mc: services.mc });
-  statusRoutes(app, { ...ctx, mc: services.mc, startup: services.startup, stats: services.stats, setups: services.setups, jobs: services.jobs, golive: services.golive, offsite: services.offsite });
+  statusRoutes(app, { ...ctx, mc: services.mc, startup: services.startup, stats: services.stats, setups: services.setups, jobs: services.jobs, golive: services.golive, diagnose: services.diagnose, offsite: services.offsite });
   const playersOnline = async () => {
     for (const sv of listServers(db)) {
       if (!mcRoot(sv)) continue;

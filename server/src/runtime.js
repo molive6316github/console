@@ -48,6 +48,13 @@ export function createRuntime({ db, dataDir, statusTimeoutMs = 6000, actionTimeo
     return withTimeout(Promise.resolve(driver.status(server.target, { id: server.id })), statusTimeoutMs, "status check");
   }
 
+  // Set when the process exited by itself and its session was kept so the output can be read. null otherwise.
+  async function exitInfo(server) {
+    const driver = getDriver(server.type);
+    if (!driver.exitInfo) return null;
+    return withTimeout(Promise.resolve(driver.exitInfo(server.target, { id: server.id })), statusTimeoutMs, "exit check").catch(() => null);
+  }
+
   function setExpected(id, expected) {
     db.prepare(
       `INSERT INTO server_state (server_id, expected, alerted, fails) VALUES (?, ?, 0, 0)
@@ -107,5 +114,5 @@ export function createRuntime({ db, dataDir, statusTimeoutMs = 6000, actionTimeo
     }
   }
 
-  return { perform, status, busy, backups, setExpected };
+  return { perform, status, exitInfo, busy, backups, setExpected };
 }

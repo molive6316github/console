@@ -22,6 +22,20 @@ export function playersTab(box, { server, life }) {
     }
   }
 
+  const mine = (() => { try { return localStorage.getItem("mcName") ?? ""; } catch { return ""; } })();
+  const meInput = h("input", { placeholder: "Your Minecraft name", autocomplete: "off", spellcheck: "false", value: mine });
+  const wlState = h("span", { class: "muted small" });
+  async function addMe() {
+    const n = meInput.value.trim();
+    if (!n) return toast("Type your Minecraft name first", true);
+    try { localStorage.setItem("mcName", n); } catch { /* optional */ }
+    try {
+      await api(`${base(server)}/action`, { method: "POST", body: { action: "whitelist-add", player: n } });
+      await api(`${base(server)}/action`, { method: "POST", body: { action: "op", player: n } });
+      toast(`${n} is whitelisted and an operator`);
+      setTimeout(refresh, 1200);
+    } catch (e) { toast(e.message.includes("running") ? "Start the server first, then try again." : e.message, true); }
+  }
   const nameInput = h("input", { placeholder: "Player name", autocomplete: "off", spellcheck: "false" });
   const msgInput = h("input", { placeholder: "Say something to everyone…", autocomplete: "off" });
 
@@ -30,6 +44,7 @@ export function playersTab(box, { server, life }) {
       "div",
       { class: "panel" },
       h("h2", {}, "Quick actions"),
+      h("div", { class: "row" }, meInput, h("button", { class: "primary", onclick: addMe }, "Whitelist + op me"), h("button", { onclick: () => act("whitelist-off") }, "Whitelist off"), h("button", { onclick: () => act("whitelist-on") }, "Whitelist on"), wlState),
       h("div", { class: "row" }, h("button", { class: "primary", onclick: () => act("save-all") }, "Save world now"), h("button", { onclick: () => act("time", { value: "day" }) }, "Make it day"), h("button", { onclick: () => act("time", { value: "night" }) }, "Make it night"), h("button", { onclick: () => act("weather", { value: "clear" }) }, "Clear weather"), h("button", { onclick: () => act("weather", { value: "rain" }) }, "Rain")),
       h("form", { class: "row", onsubmit: (e) => (e.preventDefault(), msgInput.value.trim() && (act("say", { message: msgInput.value }), (msgInput.value = ""))) }, msgInput, h("button", { type: "submit" }, "Announce")),
       h(
@@ -44,8 +59,6 @@ export function playersTab(box, { server, life }) {
         h(
           "div",
           { class: "row" },
-          h("button", { onclick: () => act("whitelist-on") }, "Whitelist on"),
-          h("button", { onclick: () => act("whitelist-off") }, "Whitelist off"),
           h("select", { onchange: (e) => e.target.value && act("difficulty", { value: e.target.value }) }, h("option", { value: "" }, "Difficulty…"), ...["peaceful", "easy", "normal", "hard"].map((d) => h("option", { value: d }, d)))
         )
     )
@@ -59,6 +72,7 @@ export function playersTab(box, { server, life }) {
       return void statusBox.replaceChildren(h("div", { class: "error" }, e.message));
     }
     if (life.dead) return;
+    wlState.textContent = p.whitelistOn ? "Whitelist is ON: only listed players can join." : "Whitelist is OFF: anyone with the address can join.";
     statusBox.replaceChildren(
       !p.up
         ? h("p", { class: "muted" }, "The server is off. Start it to see who's online.")

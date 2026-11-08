@@ -62,6 +62,11 @@ export function overviewPage(box, { server, me, life, reload }) {
     } catch {
       return;
     }
+    const pill = power.querySelector(".state-pill");
+    if (pill && !server.busy && ["starting", "crashed"].includes(st.state)) {
+      pill.lastChild.textContent = st.state === "starting" ? "Starting… (not answering players yet)" : `Crashed${st.exit?.code != null ? ` (exit code ${st.exit.code})` : ""}: open the Console tab to see why`;
+      pill.classList.toggle("bad", st.state === "crashed");
+    }
     addr.replaceChildren(
       h("div", { class: "label" }, "Server address"),
       st.address

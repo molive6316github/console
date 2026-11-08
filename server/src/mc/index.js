@@ -79,6 +79,8 @@ export function createMc({ saveMeta = () => {}, saveTarget = () => {}, validateT
       ops: (await readJson(path.join(root, "ops.json"))).map((p) => p.name).filter(Boolean),
       banned: (await readJson(path.join(root, "banned-players.json"))).map((p) => ({ name: p.name, reason: p.reason })).filter((p) => p.name),
     };
+    const props = await fs.readFile(path.join(root, "server.properties"), "utf8").then((t) => parse(t).values).catch(() => ({}));
+    lists.whitelistOn = props["white-list"] === "true";
     if (status !== "up" || !driver.send) return { up: false, ...lists };
     try {
       await driver.send(server.target, "list", { id: server.id });
@@ -194,7 +196,10 @@ export function createMc({ saveMeta = () => {}, saveTarget = () => {}, validateT
     const port = Number(props["server-port"]) || 25565;
     const up = (await runtime.status(server).catch(() => "unknown")) === "up";
     const r = up ? await pingImpl("127.0.0.1", port) : { online: false };
-    return { process: up ? "up" : "down", ...r, port, level: props["level-name"] || "world", ...joinInfo(port), configuredMotd: String(props.motd ?? "").replace(/§./g, "") };
+    // One word the UI can trust: stopped / crashed (process exited by itself) / starting (alive, port not answering yet) / online.
+    const exit = up ? null : await (runtime.exitInfo?.(server) ?? null);
+    const state = r.online ? "online" : up ? "starting" : exit ? "crashed" : "stopped";
+    return { state, exit: exit ? { code: exit.exitCode } : null, process: up ? "up" : "down", ...r, port, level: props["level-name"] || "world", ...joinInfo(port), configuredMotd: String(props.motd ?? "").replace(/§./g, "") };
   }
 
   // ---- GitHub sync ----

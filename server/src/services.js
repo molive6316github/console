@@ -11,6 +11,7 @@ import { createSetups } from "./setups/index.js";
 import { getServer, getSetting, setSetting, listServers } from "./db.js";
 import { createOffsite } from "./offsite.js";
 import { createGoLive } from "./mc/golive.js";
+import { createDiagnose } from "./mc/diagnose.js";
 import { createStartup, restartCrons } from "./mc/startup.js";
 import { createStats } from "./mc/stats.js";
 import { mcRoot } from "./mc/index.js";
@@ -88,6 +89,7 @@ export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverO
   });
   startupRef = startup;
   const golive = createGoLive({ db, mc, startup, offsite, run: runCmd, getSetting: (k, d = "") => getSetting(db, k, d), hostMemMb: () => Math.round(os.totalmem() / 1048576) });
+  const diagnose = createDiagnose({ mc, run: runCmd });
   const stats = createStats({
     paneRun: async (session) => (await runCmd("tmux", ["display-message", "-p", "-t", `=${session}:`, "#{pane_pid}"])).stdout,
     cores: os.cpus().length || 1,
@@ -111,6 +113,7 @@ export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverO
     stats,
     offsite,
     golive,
+    diagnose,
     start({ monitorSec = 60 } = {}) {
       scheduler.start();
       if (monitorSec > 0) {

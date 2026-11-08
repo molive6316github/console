@@ -8,7 +8,8 @@ export async function goLivePage(box, { server, life }) {
   const list = h("div", { class: "stack wide" }, h("p", { class: "muted" }, "Checking…"));
   const sum = h("div", { class: "panel" });
   const offBox = h("div", { class: "panel" });
-  box.append(sum, list, offBox);
+  const diag = h("div", { class: "panel" });
+  box.append(diagBox(diag, server), sum, list, offBox);
 
   async function draw() {
     const g = await api(`${base(server)}/golive`);
@@ -57,4 +58,20 @@ async function drawOffsite(box, redraw) {
           o.configured ? h("button", { onclick: async () => { try { await api("/offsite/test", { method: "POST", body: {} }); toast("Works"); } catch (e) { toast(e.message, true); } } }, "Test again") : null,
           o.configured ? h("button", { class: "danger", onclick: async () => { await api("/offsite", { method: "DELETE" }); drawOffsite(box, redraw); redraw(); } }, "Stop copying") : null),
         h("small", { class: "muted" }, "Keys are stored on this server only and never shown again. Use keys that can only touch this one bucket."))));
+}
+
+function diagBox(box, server) {
+  const out = h("div", { class: "stack wide" });
+  const run = async () => {
+    out.replaceChildren(h("p", { class: "muted" }, "Looking…"));
+    try {
+      const d = await api(`${base(server)}/diagnose`);
+      out.replaceChildren(
+        ...d.checks.map((c) => { const [sym, cls] = ICON[c.state] ?? ICON.info; return h("div", { class: "row tight golive-row" }, h("span", { class: `gl-ico ${cls}` }, sym), h("div", { class: "grow" }, h("b", {}, c.label), h("div", { class: "muted small" }, c.detail))); }),
+        d.log ? h("pre", { class: "snippet" }, d.log) : null
+      );
+    } catch (e) { out.replaceChildren(h("div", { class: "error" }, e.message)); }
+  };
+  box.append(h("h2", {}, "Something wrong?"), h("p", { class: "muted" }, "One click checks the server process, Java, memory and the last log lines, and says what's wrong in plain words."), h("div", { class: "row" }, h("button", { class: "primary", onclick: run }, "Diagnose")), out);
+  return box;
 }

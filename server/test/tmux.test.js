@@ -71,3 +71,19 @@ test("validate() cleans good targets and rejects bad ones", () => {
     assert.throws(() => tmux.validate(bad), TargetError, JSON.stringify(bad));
   }
 });
+
+test("a crashed server stays readable: shows stopped, keeps its output and exit code, and starts again", { skip }, async () => {
+  const t = { session: `${NAME}crash`, startCommand: `bash -c 'echo about to die; exit 3'` };
+  try {
+    await tmux.start(t);
+    assert.ok(await until(async () => (await tmux.status(t)) === "down"), "dead pane counts as down");
+    const logs = await tmux.logs(t);
+    assert.match(logs, /about to die/);
+    assert.match(logs, /exited with code 3/);
+    assert.equal((await tmux.exitInfo(t)).exitCode, 3);
+    await tmux.start(t); // clears the dead session and launches again
+    assert.ok(await until(async () => (await tmux.logs(t)).includes("about to die")));
+    await tmux.stop(t);
+    assert.equal(await tmux.exitInfo(t), null);
+  } finally { spawnSync("tmux", ["kill-session", "-t", `=${t.session}`]); }
+});
