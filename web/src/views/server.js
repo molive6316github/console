@@ -1,6 +1,7 @@
 import { h, api, toast, dot, lifecycle, bytes, when, sqlTime, setLeaveGuard } from "../ui.js";
 import { actionButtons, uptimeText } from "./servers.js";
 import { serverForm } from "./serverForm.js";
+import { followJob } from "./create.js";
 
 const TABS = [
   { id: "console", label: "Console", show: (s) => s.caps.logs || s.canSend },
@@ -346,7 +347,20 @@ function activityTab(box, { server }) {
 }
 
 // ---- settings (edit / remove) -------------------------------------------------------------
-async function settingsTab(box, { server, reload }) {
+async function settingsTab(box, { server, reload, life }) {
+  const git = await api(`/servers/${encodeURIComponent(server.id)}/git`).catch(() => null);
+  if (git) {
+    const out = h("div", {});
+    const btn = h("button", { class: "primary", onclick: async () => {
+      btn.disabled = true;
+      out.replaceChildren();
+      try {
+        const { jobId } = await api(`/servers/${encodeURIComponent(server.id)}/git-update`, { method: "POST", body: {} });
+        followJob(out, jobId, { life, onDone: () => { btn.disabled = false; } });
+      } catch (err) { toast(err.message, true); btn.disabled = false; }
+    } }, "Update from GitHub");
+    box.append(h("div", { class: "panel" }, h("h2", {}, "GitHub"), h("p", { class: "muted" }, `Set up from ${git.repo}${git.branch ? ` (${git.branch})` : ""}. Update pulls the latest code${git.kind === "static" ? "." : ", reinstalls dependencies and restarts it."}`), btn, out));
+  }
   if (server.source !== "ui") {
     box.append(h("div", { class: "panel" }, h("p", {}, "This server is defined in servers.json on the machine, so it's edited there. Servers you add from the web UI can be edited here.")));
     return;

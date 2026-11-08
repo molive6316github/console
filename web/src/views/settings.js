@@ -1,4 +1,5 @@
 import { h, api, toast, field } from "../ui.js";
+import { LEVELS, getLevel, setLevel } from "../level.js";
 
 export async function settingsView(box, { me }) {
   let s;
@@ -11,6 +12,7 @@ export async function settingsView(box, { me }) {
   const tz = h("input", { value: s.timezone, placeholder: "America/New_York", spellcheck: "false" });
   const keep = h("input", { type: "number", min: "1", max: "50", value: String(s.backupKeep) });
   const msg = h("div", { class: "error" });
+  const ghToken = h("input", { type: "password", autocomplete: "off", spellcheck: "false", placeholder: s.githubToken ? `Saved (${s.githubToken}). Paste a new one to replace.` : "ghp_… or github_pat_…" });
 
   async function save(body, ok) {
     msg.textContent = "";
@@ -58,6 +60,39 @@ export async function settingsView(box, { me }) {
         msg,
         h("button", { class: "primary", type: "submit" }, "Save")
       )
+    ),
+    h(
+      "div",
+      { class: "panel" },
+      h("h2", {}, "GitHub access"),
+      h("p", { class: "muted" }, "Only needed for private repositories. Create a fine-grained token on GitHub with read-only \"Contents\" access to just the repos you want. It is stored on this machine, never shown again, and never printed in logs."),
+      h(
+        "form",
+        { class: "stack wide", onsubmit: async (e) => (e.preventDefault(), ghToken.value.trim() && (await save({ githubToken: ghToken.value.trim() }, "Token saved"), (ghToken.value = ""))) },
+        field("GitHub token", ghToken),
+        h("div", { class: "row" }, h("button", { class: "primary", type: "submit" }, "Save token"), s.githubToken && h("button", { type: "button", class: "danger", onclick: () => confirm("Forget the GitHub token?") && save({ githubToken: "" }, "Token removed").then(() => location.reload()) }, "Remove"))
+      )
+    ),
+    h(
+      "div",
+      { class: "panel" },
+      h("h2", {}, "How much to show"),
+      h("p", { class: "muted" }, "This only changes what you see in this browser. It never changes what anyone is allowed to do."),
+      h("div", { class: "stack wide" }, ...LEVELS.map((l) => h("label", { class: "check" }, h("input", { type: "radio", name: "level", checked: getLevel() === l.id, onchange: () => setLevel(l.id) }), h("span", {}, h("b", {}, l.label), ` — ${l.blurb}`))))
+    ),
+    h(
+      "div",
+      { class: "panel" },
+      h("h2", {}, "Restart Console"),
+      h("p", { class: "muted" }, "Needed after changing the Linux user's groups (for example to use Docker). Servers you started keep running."),
+      h("button", { onclick: async () => {
+        if (!confirm("Restart Console now?")) return;
+        try {
+          const r = await api("/restart", { method: "POST", body: {} });
+          toast(r.restarting ? "Restarting… the page will reconnect" : "Console isn't running under systemd, so restart it yourself");
+          if (r.restarting) setTimeout(() => location.reload(), 4000);
+        } catch (err) { toast(err.message, true); }
+      } }, "Restart Console")
     ),
     h("div", { class: "panel" }, h("h2", {}, "Safe mode"), h("p", { class: "muted" }, me.safeMode ? "Safe mode is ON. Adding/editing servers, the file editor and sending commands are disabled." : "Safe mode is off. To disable adding/editing servers, the file editor and commands (for example on a shared install), set CONSOLE_SAFE_MODE=1 in /etc/console.env and restart Console."))
   );

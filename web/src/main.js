@@ -10,6 +10,8 @@ import { auditView } from "./views/audit.js";
 import { accountView } from "./views/account.js";
 import { updatesView } from "./views/updates.js";
 import { discoverView, newServerView } from "./views/discover.js";
+import { createView } from "./views/create.js";
+import { LEVELS, atLeast, getLevel, setLevel } from "./level.js";
 
 const app = document.getElementById("app");
 let me = null;
@@ -55,12 +57,16 @@ function renderLogin(message = "") {
 // ---- layout + routing ---------------------------------------------------------
 const isAdmin = () => me.role === "admin";
 
+// What shows up depends on the experience level (Simple / Standard / Advanced) as well as on the role.
 function navItems() {
   const items = [["#/", "Servers", "servers"]];
-  if (isAdmin() || me.allServers) items.push(["#/host", "Host", "host"]);
+  if (isAdmin() && !me.safeMode) items.push(["#/create", "Create", "create"]);
+  if (atLeast("standard") && (isAdmin() || me.allServers)) items.push(["#/host", "Host", "host"]);
   if (isAdmin()) {
-    items.push(["#/discover", "Discover", "discover"], ["#/schedules", "Schedules", "schedules"], ["#/users", "Users", "users"], ["#/settings", "Settings", "settings"], ["#/audit", "Audit", "audit"]);
-    items.push(["#/updates", updateInfo?.ok && updateInfo.behind > 0 ? `Updates (${updateInfo.behind})` : "Updates", "updates"]);
+    if (atLeast("standard")) items.push(["#/discover", "Discover", "discover"], ["#/schedules", "Schedules", "schedules"], ["#/users", "Users", "users"]);
+    items.push(["#/settings", "Settings", "settings"]);
+    if (atLeast("advanced")) items.push(["#/audit", "Audit", "audit"]);
+    if (atLeast("standard") || (updateInfo?.ok && updateInfo.behind > 0)) items.push(["#/updates", updateInfo?.ok && updateInfo.behind > 0 ? `Updates (${updateInfo.behind})` : "Updates", "updates"]);
   }
   items.push(["#/account", "Account", "account"]);
   return items;
@@ -69,7 +75,7 @@ function navItems() {
 function parseRoute() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
   if (parts[0] === "s" && parts[1]) return { name: "server", id: parts[1], tab: parts[2] };
-  return { name: parts[0] || "servers" };
+  return { name: parts[0] || "servers", param: parts[1] };
 }
 
 const VIEWS = {
@@ -77,6 +83,7 @@ const VIEWS = {
   host: { render: hostView, allowed: () => isAdmin() || me.allServers },
   discover: { render: discoverView, admin: true },
   new: { render: newServerView, admin: true, allowed: () => !me.safeMode },
+  create: { render: createView, admin: true, allowed: () => !me.safeMode },
   schedules: { render: schedulesView, admin: true },
   users: { render: usersView, admin: true },
   settings: { render: settingsView, admin: true },
@@ -88,7 +95,7 @@ const VIEWS = {
 function drawNav() {
   if (!navEl) return;
   const route = parseRoute();
-  const current = route.name === "server" ? "servers" : route.name === "new" ? "discover" : route.name;
+  const current = route.name === "server" ? "servers" : route.name === "new" ? (atLeast("standard") ? "discover" : "create") : route.name;
   navEl.replaceChildren(...navItems().map(([href, label, key]) => h("a", { href, class: key === current ? "on" : "" }, label)));
 }
 
@@ -109,8 +116,14 @@ function render() {
     location.hash = "#/";
     return;
   }
-  const out = v.render(content, { me });
+  const out = v.render(content, { me, param: route.param });
   if (typeof out === "function") cleanup = out;
+}
+
+function levelPicker() {
+  const sel = h("select", { class: "levelpick", "aria-label": "How much to show", title: LEVELS.find((l) => l.id === getLevel())?.blurb, onchange: (e) => setLevel(e.target.value) }, ...LEVELS.map((l) => h("option", { value: l.id }, l.label)));
+  sel.value = getLevel();
+  return sel;
 }
 
 function renderShell() {
@@ -128,6 +141,7 @@ function renderShell() {
         h(
           "div",
           { class: "who" },
+          levelPicker(),
           h("span", {}, `${me.username} · ${me.role}`),
           h("button", { onclick: async () => (await api("/logout", { method: "POST", body: {} }).catch(() => {}), renderLogin()) }, "Sign out")
         )
@@ -145,6 +159,7 @@ window.addEventListener("hashchange", () => {
   }
   render();
 });
+window.addEventListener("console:level", () => me && (renderShell(), render()));
 window.addEventListener("console:signed-out", () => me && renderLogin("Session expired, sign in again"));
 
 async function boot() {

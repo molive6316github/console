@@ -241,3 +241,14 @@ h3 { font-size: 13px; margin: 18px 0 6px; color: var(--muted); text-transform: u
 .tag { display: inline-block; font-size: 11px; background: var(--panel-2); border-radius: 6px; padding: 1px 7px; margin-right: 4px; color: var(--muted); }
 tr.unused td { color: var(--muted); }
 td code { overflow-wrap: anywhere; }
+
+/* create + levels */
+a.card.pick { text-decoration: none; color: inherit; }
+a.card.pick:hover { border-color: var(--accent); }
+.card .big { font-size: 22px; }
+.jobstatus { font-size: 14px; margin: 4px 0; }
+.jobstatus.good { color: var(--up); }
+.jobstatus.bad { color: var(--down); }
+button.linklike { background: none; border: 0; color: var(--accent); padding: 0; text-align: left; width: fit-content; }
+select.levelpick { padding: 4px 8px; font-size: 13px; }
+.field.check { flex-direction: row; flex-wrap: wrap; align-items: center; }
