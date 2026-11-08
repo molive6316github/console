@@ -1,3 +1,4 @@
+import { parsePerms } from "./perms.js";
 import { randomBytes, scryptSync, timingSafeEqual, createHash } from "node:crypto";
 
 export const ROLES = ["viewer", "operator", "admin"];
@@ -33,7 +34,7 @@ export function userFromToken(db, token) {
   if (!token) return null;
   const row = db
     .prepare(
-      `SELECT u.id, u.username, u.role, u.all_servers, s.expires_at FROM sessions s
+      `SELECT u.id, u.username, u.role, u.all_servers, u.perms, s.expires_at FROM sessions s
        JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`
     )
     .get(sha(token));
@@ -42,7 +43,7 @@ export function userFromToken(db, token) {
     db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(sha(token));
     return null;
   }
-  return { id: row.id, username: row.username, role: row.role, allServers: row.all_servers === 1 };
+  return { id: row.id, username: row.username, role: row.role, allServers: row.all_servers === 1, perms: parsePerms(row.perms, row.role) };
 }
 
 // Sets a new password and signs out every session of that user except keepToken (the one making the change).

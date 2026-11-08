@@ -49,6 +49,7 @@ export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverO
   });
   const mc = createMc({ runtime, fetchImpl, getToken: () => getSetting(db, "github_token", "") || "", getMeta: (id) => setups.metaOf(id),
     jobs,
+    getJoin: () => ({ domain: getSetting(db, "join_domain", ""), srv: getSetting(db, "join_srv", "0") === "1", ip: process.env.CONSOLE_PUBLIC_IP || "" }),
     cfgGet: (id) => { try { return JSON.parse(getSetting(db, `mcgh.${id}`, "") || "null"); } catch { return null; } },
     cfgSet: (id, v) => setSetting(db, `mcgh.${id}`, JSON.stringify(v)),
     dataDir: dir,

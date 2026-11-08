@@ -31,11 +31,11 @@ test("an existing database upgrades in place and keeps its data", () => {
   assert.deepEqual({ ...u }, { username: "max", role: "admin", all_servers: 1 });
   assert.equal(listServers(db)[0].source, "file");
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM audit_log").get().n, 1);
-  assert.equal(db.prepare("PRAGMA user_version").get().user_version, 2);
+  assert.equal(db.prepare("PRAGMA user_version").get().user_version, 3);
   db.close();
 
   const again = openDb(file); // opening twice must be a no-op
-  assert.equal(again.prepare("PRAGMA user_version").get().user_version, 2);
+  assert.equal(again.prepare("PRAGMA user_version").get().user_version, 3);
 });
 
 test("servers.json only manages its own rows: UI-added servers survive a sync", () => {

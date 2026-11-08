@@ -1,5 +1,6 @@
 import { hashPassword, ROLES } from "./auth.js";
 import { getServer } from "./db.js";
+import { parsePerms, validatePerms, PRESETS } from "./perms.js";
 
 export class UserError extends Error {
   constructor(message, status = 400) {
@@ -14,13 +15,14 @@ export const MIN_PASSWORD = 10;
 export function listUsers(db) {
   const grants = db.prepare("SELECT user_id, server_id FROM user_servers").all();
   return db
-    .prepare("SELECT id, username, role, all_servers, created_at FROM users ORDER BY username COLLATE NOCASE")
+    .prepare("SELECT id, username, role, all_servers, perms, created_at FROM users ORDER BY username COLLATE NOCASE")
     .all()
     .map((u) => ({
       id: u.id,
       username: u.username,
       role: u.role,
       allServers: u.all_servers === 1,
+      perms: parsePerms(u.perms, u.role),
       servers: grants.filter((g) => g.user_id === u.id).map((g) => g.server_id),
       created: u.created_at,
     }));
@@ -74,6 +76,13 @@ export function updateUser(db, id, body, actorId) {
     if (typeof b.password !== "string" || b.password.length < MIN_PASSWORD) throw new UserError(`Password must be at least ${MIN_PASSWORD} characters`);
     if (b.password.length > 200) throw new UserError("Password is too long");
     db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(hashPassword(b.password), id);
+  }
+  if (b.perms !== undefined || b.preset !== undefined) {
+    if (role === "admin") throw new UserError("Owners always have every permission");
+    let list = null;
+    if (b.preset) { if (!PRESETS[b.preset]) throw new UserError("Unknown role"); list = PRESETS[b.preset].perms; }
+    else if (b.perms !== null) { list = validatePerms(b.perms); if (!list) throw new UserError("Those permissions aren't valid"); }
+    db.prepare("UPDATE users SET perms = ? WHERE id = ?").run(list ? JSON.stringify(list) : null, id);
   }
   db.prepare("UPDATE users SET role = ?, all_servers = ? WHERE id = ?").run(role, scope.allServers ? 1 : 0, id);
   setGrants(db, id, scope.servers);

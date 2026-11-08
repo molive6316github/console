@@ -93,6 +93,21 @@ const MIGRATIONS = [
      last_status TEXT,
      last_detail TEXT
    );`,
+  // 3: per-person permissions and invite links
+  `ALTER TABLE users ADD COLUMN perms TEXT;
+   CREATE TABLE invites (
+     id         INTEGER PRIMARY KEY AUTOINCREMENT,
+     token_hash TEXT NOT NULL UNIQUE,
+     server_id  TEXT NOT NULL,
+     preset     TEXT,
+     perms      TEXT NOT NULL,
+     note       TEXT,
+     created_by TEXT NOT NULL,
+     created_at INTEGER NOT NULL,
+     expires_at INTEGER NOT NULL,
+     used_at    INTEGER,
+     used_by    TEXT
+   );`,
 ];
 
 function migrate(db) {

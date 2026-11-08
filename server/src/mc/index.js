@@ -8,6 +8,8 @@ import { createPlugins } from "./plugins.js";
 import { pauseSaves } from "./savehooks.js";
 import { restoreBackup, resetWorld } from "./worlds.js";
 import { pushConfig, pushWorld, repoOf } from "./github.js";
+import { ping } from "./slp.js";
+import { parse } from "./props.js";
 import { tokenSecrets } from "../gitutil.js";
 import { BACKUP_NAME } from "../backups.js";
 
@@ -38,7 +40,7 @@ async function readJson(file) {
   }
 }
 
-export function createMc({ runtime, listWaitMs = 900, fetchImpl = fetch, getToken, getMeta, jobs, cfgGet = () => null, cfgSet = () => {}, dataDir = "/tmp/console-mc", saveWaitMs = 30_000 }) {
+export function createMc({ runtime, listWaitMs = 900, fetchImpl = fetch, getToken, getMeta, jobs, getJoin = () => ({}), pingImpl = ping, cfgGet = () => null, cfgSet = () => {}, dataDir = "/tmp/console-mc", saveWaitMs = 30_000 }) {
   const plugins = createPlugins({ fetchImpl, getToken, getMeta });
   const rootKind = (server) => {
     const root = mcRoot(server);
@@ -145,6 +147,25 @@ export function createMc({ runtime, listWaitMs = 900, fetchImpl = fetch, getToke
     }
   }
 
+  // What players type to join: your domain (no port when an SRV record covers it), else the public IP, with :port when it isn't 25565.
+  function joinInfo(port) {
+    const j = getJoin() ?? {};
+    const host = j.domain || j.ip || "";
+    const showPort = port !== 25565 && !(j.domain && j.srv);
+    return { host, port, address: host ? (showPort ? `${host}:${port}` : host) : "", domain: j.domain || "", srv: Boolean(j.srv) };
+  }
+
+  // Live status without touching the console: asks the server the same question the game's server list does.
+  async function liveStatus(server) {
+    const root = mcRoot(server);
+    if (!root) throw new McError("This isn't a Minecraft server", 404);
+    const props = parse(await fs.readFile(path.join(root, "server.properties"), "utf8")).values;
+    const port = Number(props["server-port"]) || 25565;
+    const up = (await runtime.status(server).catch(() => "unknown")) === "up";
+    const r = up ? await pingImpl("127.0.0.1", port) : { online: false };
+    return { process: up ? "up" : "down", ...r, port, level: props["level-name"] || "world", ...joinInfo(port), configuredMotd: String(props.motd ?? "").replace(/§./g, "") };
+  }
+
   // ---- GitHub sync ----
   const cfgOf = (server) => ({ repo: "", keep: 5, ...(cfgGet(server.id) ?? {}) });
   const gh = {
@@ -199,7 +220,7 @@ export function createMc({ runtime, listWaitMs = 900, fetchImpl = fetch, getToke
   }
 
   return {
-    getProps, setProps, players, act, safeBackup, restore, reset, gh, scheduled,
+    getProps, setProps, players, act, liveStatus, joinInfo, safeBackup, restore, reset, gh, scheduled,
     plugins: {
       kind: (server) => rootKind(server).kind,
       list: async (server) => { const { root, kind } = rootKind(server); return { kind, files: await plugins.list(root, kind) }; },

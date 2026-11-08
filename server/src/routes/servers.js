@@ -8,18 +8,21 @@ import { validateServerInput, idTaken, InputError } from "../servers.js";
 import { createFiles, FileError } from "../files.js";
 import { BACKUP_NAME } from "../backups.js";
 import { mcRoot, mcKind } from "../mc/index.js";
+import { hasPerm } from "../perms.js";
 
 const DAY = 86_400_000;
 
-export function serverRoutes(app, { db, need, runtime, safeMode }) {
+export function serverRoutes(app, { db, need, allow, runtime, safeMode }) {
   const scoped = async (req, reply) => {
     const s = serverFor(db, req.user, req.params.id);
     if (!s) return reply.code(404).send({ error: "No such server" });
     req.srv = s;
   };
   const view = [need("viewer"), scoped];
-  const operate = [need("operator"), scoped];
   const admin = [need("admin"), scoped];
+  const power = [allow("power"), scoped];
+  const sendCmd = [allow("send"), scoped];
+  const seeConsole = [allow("console"), scoped];
   const noSafeMode = async (req, reply) => {
     if (safeMode) return reply.code(403).send({ error: "Safe mode is on (CONSOLE_SAFE_MODE=1): this is disabled" });
   };
@@ -34,7 +37,7 @@ export function serverRoutes(app, { db, need, runtime, safeMode }) {
     }
     const caps = capsOf(s);
     const isAdmin = user.role === "admin";
-    const operator = user.role === "operator" || isAdmin;
+    const can = (p) => hasPerm(user, p);
     // The target (hosts, commands, paths) stays server-side: it is not sent to the browser, except to admins on the edit screen.
     return {
       id: s.id,
@@ -46,10 +49,10 @@ export function serverRoutes(app, { db, need, runtime, safeMode }) {
       busy: runtime.busy.has(s.id),
       uptime24h: uptimePercent(db, s.id, Date.now() - DAY),
       caps,
-      canAct: operator && !caps.readOnly,
-      canSend: operator && caps.send && !safeMode,
-      canEditFiles: isAdmin && caps.files && !safeMode,
-      canBackup: isAdmin && caps.files,
+      canAct: can("power") && !caps.readOnly,
+      canSend: can("send") && caps.send && !safeMode,
+      canEditFiles: can("files") && caps.files && !safeMode,
+      canBackup: can("backups") && caps.files,
       canEditConfig: isAdmin && s.source === "ui" && !safeMode,
       mc: (() => { const r = mcRoot(s); return r ? { kind: mcKind(r) } : null; })(),
     };
@@ -109,21 +112,21 @@ export function serverRoutes(app, { db, need, runtime, safeMode }) {
   });
 
   // ---- actions -------------------------------------------------------------
-  app.post("/api/servers/:id/command", { preHandler: [...operate, noSafeMode] }, async (req, reply) => {
+  app.post("/api/servers/:id/command", { preHandler: [...sendCmd, noSafeMode] }, async (req, reply) => {
     const text = req.body?.text;
     if (typeof text !== "string" || !text.trim()) return reply.code(400).send({ error: "Type a command" });
     await runtime.perform(req.srv, "command", req.user.username, text.trim());
     return { ok: true };
   });
 
-  app.post("/api/servers/:id/:action", { preHandler: operate }, async (req, reply) => {
+  app.post("/api/servers/:id/:action", { preHandler: power }, async (req, reply) => {
     const { action } = req.params;
     if (!LIFECYCLE.includes(action)) return reply.code(400).send({ error: "Unknown action" });
     return runtime.perform(req.srv, action, req.user.username);
   });
 
   // ---- logs ----------------------------------------------------------------
-  app.get("/api/servers/:id/logs", { preHandler: view }, async (req, reply) => {
+  app.get("/api/servers/:id/logs", { preHandler: seeConsole }, async (req, reply) => {
     if (!capsOf(req.srv).logs) return reply.code(400).send({ error: "This kind of server has no logs" });
     const lines = Math.min(Math.max(parseInt(req.query?.lines, 10) || 300, 10), 2000);
     try {
@@ -144,7 +147,7 @@ export function serverRoutes(app, { db, need, runtime, safeMode }) {
       return reply.code(e.status ?? 500).send({ error: e.message });
     }
   };
-  const fileAdmin = [...admin, noSafeMode, fileTools];
+  const fileAdmin = [allow("files"), scoped, noSafeMode, fileTools];
 
   app.get("/api/servers/:id/files", { preHandler: fileAdmin }, async (req) => req.fileTools.list(req.query?.path));
   app.get("/api/servers/:id/file", { preHandler: fileAdmin }, async (req) => req.fileTools.read(req.query?.path));
@@ -162,7 +165,8 @@ export function serverRoutes(app, { db, need, runtime, safeMode }) {
 
   // ---- backups (admin) -----------------------------------------------------
   const backupAdmin = [
-    ...admin,
+    allow("backups"),
+    scoped,
     async (req, reply) => {
       if (!filesRootOf(req.srv)) return reply.code(404).send({ error: "This server has no files folder set" });
     },

@@ -9,11 +9,11 @@ import { mcRoot } from "../mc/index.js";
 import { getDriver } from "../drivers/index.js";
 import { filesRootOf } from "../runtime.js";
 import { hostHistory } from "../monitor.js";
-import { visibleServers } from "../access.js";
+import { visibleServers, serverFor } from "../access.js";
 
 const HOUR = 3_600_000;
 
-export function adminRoutes(app, { db, need, runtime, notifier, scheduler, safeMode, terminal }) {
+export function adminRoutes(app, { db, need, allow, runtime, notifier, scheduler, safeMode, terminal }) {
   // ---- users -----------------------------------------------------------------
   app.get("/api/users", { preHandler: need("admin") }, async () => listUsers(db));
 
@@ -206,9 +206,11 @@ export function adminRoutes(app, { db, need, runtime, notifier, scheduler, safeM
   });
 
   // ---- audit -----------------------------------------------------------------
-  app.get("/api/audit", { preHandler: need("admin") }, async (req) => {
+  app.get("/api/audit", { preHandler: allow("activity") }, async (req, reply) => {
     const limit = Math.min(Math.max(parseInt(req.query?.limit, 10) || 100, 1), 500);
     const server = typeof req.query?.server === "string" ? req.query.server : null;
+    // Invited people only ever see the log of a server they can access.
+    if (req.user.role !== "admin" && !(server && serverFor(db, req.user, server))) return reply.code(404).send({ error: "No such server" });
     const sql = `SELECT id, ts, username, server_id, action, ok, detail FROM audit_log ${server ? "WHERE server_id = ?" : ""} ORDER BY id DESC LIMIT ?`;
     return server ? db.prepare(sql).all(server, limit) : db.prepare(sql).all(limit);
   });

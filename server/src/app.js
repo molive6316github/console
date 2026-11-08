@@ -15,6 +15,9 @@ import { setupRoutes } from "./routes/setup.js";
 import { terminalRoutes } from "./routes/terminal.js";
 import { linuxRoutes } from "./routes/linux.js";
 import { mcRoutes } from "./routes/mc.js";
+import { inviteRoutes } from "./routes/invites.js";
+import { statusRoutes } from "./routes/status.js";
+import { hasPerm, PERMS, PRESETS } from "./perms.js";
 import { getSetting } from "./db.js";
 import {
   verifyPassword,
@@ -98,6 +101,12 @@ export function buildApp({
     if (!hasRole(req.user, minRole)) return reply.code(403).send({ error: `Requires role: ${minRole}` });
   };
 
+  // Permission check (owners always pass). People you invite carry a list of permissions; old accounts use their role's defaults.
+  const allow = (perm) => async (req, reply) => {
+    if (!req.user) return reply.code(401).send({ error: "Not logged in" });
+    if (!hasPerm(req.user, perm)) return reply.code(403).send({ error: "You don't have permission to do that" });
+  };
+
   // ---- routes --------------------------------------------------------------
   app.post("/api/login", async (req, reply) => {
     const ip = req.ip;
@@ -139,6 +148,7 @@ export function buildApp({
     username: req.user.username,
     role: req.user.role,
     allServers: req.user.allServers,
+    perms: req.user.perms,
     safeMode,
     mode: process.env.CONSOLE_MODE === "minecraft" ? "minecraft" : "standard",
     version,
@@ -194,13 +204,15 @@ export function buildApp({
   });
 
   // ---- servers, schedules, users, settings, host, audit ---------------------
-  const ctx = { app, db, need, runtime: services.runtime, notifier: services.notifier, scheduler: services.scheduler, terminal: services.terminal, safeMode };
+  const ctx = { app, db, need, allow, runtime: services.runtime, notifier: services.notifier, scheduler: services.scheduler, terminal: services.terminal, safeMode };
   serverRoutes(app, ctx);
   adminRoutes(app, ctx);
   discoverRoutes(app, { ...ctx, discover: services.discover });
   setupRoutes(app, { ...ctx, setups: services.setups, jobs: services.jobs });
   terminalRoutes(app, { ...ctx, terminal: services.terminal });
   mcRoutes(app, { ...ctx, mc: services.mc });
+  statusRoutes(app, { ...ctx, mc: services.mc });
+  inviteRoutes(app, { ...ctx, cookie: { name: COOKIE, secure: secureCookies } });
   linuxRoutes(app, { ...ctx, linux: services.linux, featureOn: () => getSetting(db, "linux_users_enabled", "0") === "1" });
 
   // Restart Console (admin). Under systemd it comes straight back; elsewhere it just says so.
