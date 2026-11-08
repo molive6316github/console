@@ -577,6 +577,7 @@ wait_for() { # url seconds: 0 once the URL answers with any HTTP status
 
 install_service() {
   render_unit "$(command -v node)" "$DIR" "$ENV_FILE" "$SVC_USER" > /etc/systemd/system/console.service
+  install_cli_shim
   systemctl daemon-reload
   systemctl enable console >/dev/null 2>&1
   systemctl restart console
@@ -1071,9 +1072,11 @@ pick_target() {
   echo "      1) Install or update Console on this machine"
   echo "      2) Create or update an isolated Docker instance  ${D}(own data, port and servers; side by side)${N}"
   [ -z "$inst" ] || echo "      3) Remove a Docker instance  ${D}(have: $inst)${N}"
+  if [ -f /etc/systemd/system/console.service ]; then echo "      4) Uninstall Console from this machine  ${D}(game worlds are kept)${N}"; fi
   choice=$(ask_default "Pick one" 1)
   case "$choice" in
     2) DOCKER_MODE=1 ;;
+    4) [ -f /etc/systemd/system/console.service ] && UNINSTALL=1 ;;
     3) if [ -n "$inst" ]; then DOCKER_REMOVE=$(ask "    Which one? "); valid_instance "$DOCKER_REMOVE" || die "Not a valid instance name."; fi ;;
   esac
 }
@@ -1226,6 +1229,13 @@ print_summary() {
 
 # ---- main ----------------------------------------------------------------------------------
 
+# So "mxt-console run" works from anywhere afterwards (it fetches the latest installer through npx).
+install_cli_shim() {
+  command -v npx >/dev/null 2>&1 || return 0
+  [ -e /usr/local/bin/mxt-console ] && ! grep -q "managed by Console" /usr/local/bin/mxt-console 2>/dev/null && return 0
+  printf '#!/bin/sh\n# managed by Console\nexec npx -y mxt-console@latest "$@"\n' > /usr/local/bin/mxt-console && chmod 0755 /usr/local/bin/mxt-console || true
+}
+
 uninstall_main() {
   [ -f /etc/systemd/system/console.service ] || [ -d "$DIR" ] || die "Console doesn't look installed here (no console service and no $DIR)."
   echo
@@ -1242,6 +1252,7 @@ uninstall_main() {
     if systemctl is-active --quiet caddy; then systemctl reload caddy || true; fi
   fi
   rm -f "$ENV_FILE"
+  grep -q "managed by Console" /usr/local/bin/mxt-console 2>/dev/null && rm -f /usr/local/bin/mxt-console
   case "$DIR" in /|/opt|/usr|/home|/root|"") die "Refusing to delete $DIR" ;; esac
   rm -rf "$DIR"
   ok "Console is removed. To put it back: sudo npx -y mxt-console@latest install"
