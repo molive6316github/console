@@ -515,7 +515,8 @@ ensure_user() {
   SVC_HOME=$(getent passwd "$SVC_USER" | cut -d: -f6)
 }
 
-as_svc() { runuser -u "$SVC_USER" -- env HOME="$SVC_HOME" "$@"; }
+# npx (run with sudo) leaves npm_config_cache pointing at root's cache, which this user can't write. Use the user's own.
+as_svc() { runuser -u "$SVC_USER" -- env HOME="$SVC_HOME" npm_config_cache="$SVC_HOME/.npm" "$@"; }
 
 fetch_code() {
   if [ -d "$DIR/.git" ]; then
