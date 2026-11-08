@@ -191,3 +191,140 @@ test("--minecraft is remembered in the env file and --standard turns it off", ()
   assert.doesNotMatch(e.read(), /CONSOLE_MODE/);
   assert.equal(sh(`parse_args --minecraft --yes; echo $MODE_FLAG`).out.trim(), "minecraft");
 });
+
+// ---- the setup wizard ---------------------------------------------------------------------
+test("wizard validators accept good input and refuse anything odd", () => {
+  const t = (fn, v) => sh(`${fn} '${v}' && echo yes || echo no`).out.trim();
+  assert.equal(t("valid_password", "correct-horse_42"), "yes");
+  assert.equal(t("valid_password", "short"), "no");
+  assert.equal(t("valid_password", "has space in it!!"), "no");
+  assert.equal(t("valid_org", "MyTeam"), "yes");
+  assert.equal(t("valid_org", "-bad"), "no");
+  assert.equal(t("valid_org", "a/b"), "no");
+  assert.equal(t("valid_hook", "https://discord.com/api/webhooks/1/abc"), "yes");
+  assert.equal(t("valid_hook", "http://discord.com/x"), "no");
+  assert.equal(t("valid_hook", "https://x.com/a b"), "no");
+  assert.equal(t("valid_tz", "America/New_York"), "yes");
+  assert.equal(t("valid_tz", "Nowhere/Land"), "no");
+  assert.equal(t("valid_tz", "../../etc/passwd"), "no");
+  assert.equal(t("valid_token", "ghp_" + "a".repeat(36)), "yes");
+  assert.equal(t("valid_token", "short"), "no");
+  assert.equal(t("valid_token", "ghp_ has space aaaaaaaaaaaaaaaa"), "no");
+  assert.equal(sh(`mask_tail ghp_abcdef123456`).out, "••••3456");
+});
+
+// Answers are fed in order to the wizard's questions, so the whole conversation can be tested without a terminal.
+const scripted = (answers) => {
+  const f = path.join(mkdtempSync(path.join(tmpdir(), "console-ans-")), "answers");
+  writeFileSync(f, answers.join("\n") + "\n");
+  // ask runs inside $(...), so the queue lives in a file rather than a variable
+  return String.raw`
+pop() { local a; a=$(head -n1 "ANSFILE"); sed -i 1d "ANSFILE"; printf '%s' "$a"; }
+ask()        { printf '%s' "$1" >&2; pop; }
+ask_secret() { printf '%s' "$1" >&2; pop; }
+`.replaceAll("ANSFILE", f);
+};
+
+test("wizard, first install: collects every answer and writes them for Console to apply once", () => {
+  const e = envFile();
+  const tok = "ghp_" + "a1".repeat(18);
+  const r = sh(
+    scripted([
+      "1", // Minecraft host
+      "maxo", // username
+      "n", // make my own password
+      "My-long-pass_99", "My-long-pass_99",
+      "", // no domain
+      "25570", // port
+      tok, // github token
+      "MyTeam", // org
+      "UTC", // time zone
+      "14", // keep
+      "https://discord.com/api/webhooks/1/abc", // webhook
+      "y", // terminal
+      "n", // linux users
+      "y", // go
+    ]) + `
+HAVE_TTY=1; DIR=/nonexistent-dir; PUBLIC_IP=203.0.113.9
+wizard
+write_wizard_env
+echo "MODE=$MODE_FLAG PORT=$PORT PW_SET=$([ -n "$ADMIN_PW_PRESET" ] && echo y)"
+`,
+    { CONSOLE_ENV_FILE: e.file, CONSOLE_DB: "/nonexistent-dir/data/console.db" }
+  );
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.match(r.out, /MODE=minecraft PORT=25570 PW_SET=y/);
+  const env = e.read();
+  assert.match(env, /^CONSOLE_ADMIN_USER=maxo$/m);
+  assert.match(env, new RegExp(`^CONSOLE_GITHUB_TOKEN=${tok}$`, "m"));
+  assert.match(env, /^CONSOLE_GITHUB_ORG=MyTeam$/m);
+  assert.match(env, /^CONSOLE_TIMEZONE=UTC$/m);
+  assert.match(env, /^CONSOLE_BACKUP_KEEP=14$/m);
+  assert.match(env, /^CONSOLE_ALERT_WEBHOOK=https:\/\/discord\.com\/api\/webhooks\/1\/abc$/m);
+  assert.match(env, /^CONSOLE_ENABLE_TERMINAL=1$/m);
+  assert.doesNotMatch(env, /LINUX_USERS/);
+  assert.doesNotMatch(r.out, new RegExp(tok), "the token is never echoed in full");
+  assert.match(r.out, /••••/);
+});
+
+test("wizard: bad answers are rejected with a warning instead of being saved, and 'no' at the end changes nothing", () => {
+  const e = envFile();
+  const r = sh(
+    scripted(["2", "root", "y", "", "", "not a token", "n", "Nowhere/Land", "999", "http://insecure", "n", "n", "n"]) + `
+HAVE_TTY=1; DIR=/nonexistent-dir
+( wizard ) && rc=0 || rc=$?; echo "wizard-exit=$rc"
+write_wizard_env
+`,
+    { CONSOLE_ENV_FILE: e.file, CONSOLE_DB: "/nonexistent-dir/data/console.db" }
+  );
+  assert.match(r.out, /wizard-exit=1/, "answering no at the final question cancels");
+  assert.match(r.err, /Cancelled/);
+  assert.equal(e.read(), "", "nothing was written");
+  assert.match(r.err, /doesn't look like a GitHub token/);
+  assert.match(r.err, /Unknown time zone/);
+  assert.match(r.err, /https:\/\/ URL/);
+  assert.match(r.err, /Using 'admin'/);
+});
+
+test("wizard on an existing install only asks about mode and address, and never touches the admin", () => {
+  const e = envFile("PORT=3000\nCONSOLE_DB=/tmp/exists.db\n");
+  writeFileSync("/tmp/exists.db", "");
+  const r = sh(
+    scripted(["1", "", "y"]) + `
+HAVE_TTY=1
+wizard
+write_wizard_env
+echo "ADMIN=$WIZ_ADMIN_USER MODE=$MODE_FLAG"
+`,
+    { CONSOLE_ENV_FILE: e.file }
+  );
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /\[2\/2\]/);
+  assert.match(r.out, /ADMIN= MODE=minecraft/);
+  assert.doesNotMatch(e.read(), /GITHUB|ADMIN_USER/);
+});
+
+test("clear_wizard_env removes the one-time keys but keeps real settings", () => {
+  const e = envFile("PORT=3000\nCONSOLE_GITHUB_TOKEN=x\nCONSOLE_TIMEZONE=UTC\nCONSOLE_ENABLE_TERMINAL=1\nCONSOLE_MODE=minecraft\n");
+  sh("clear_wizard_env", { CONSOLE_ENV_FILE: e.file });
+  assert.equal(e.read(), "PORT=3000\nCONSOLE_MODE=minecraft\n");
+});
+
+test("spin shows success quietly and prints the command's output only when it fails", () => {
+  const ok = sh(`spin "Doing a thing" bash -c 'echo SECRETNOISE'`);
+  assert.equal(ok.code, 0);
+  assert.match(ok.out, /Doing a thing/);
+  assert.doesNotMatch(ok.out + ok.err, /SECRETNOISE/);
+  const bad = sh(`spin "Doing a thing" bash -c 'echo BOOM-DETAIL; exit 3' || echo "rc=$?"`);
+  assert.match(bad.out, /rc=3/);
+  assert.match(bad.err, /BOOM-DETAIL/);
+});
+
+test("Minecraft mode is detected from the flag or the saved mode, and --standard wins", () => {
+  const e = envFile("CONSOLE_MODE=minecraft\n");
+  const t = (flag) => sh(`MODE_FLAG='${flag}'; is_mc_mode && echo yes || echo no`, { CONSOLE_ENV_FILE: e.file }).out.trim();
+  assert.equal(t(""), "yes");
+  assert.equal(t("standard"), "no");
+  assert.equal(t("minecraft"), "yes");
+  assert.equal(sh(`MODE_FLAG=''; is_mc_mode && echo yes || echo no`, { CONSOLE_ENV_FILE: envFile().file }).out.trim(), "no");
+});

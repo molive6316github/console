@@ -17,10 +17,14 @@
 #   --dir PATH      where to install (default /opt/console)
 #   --user NAME     Linux user Console runs as (default: the user who ran sudo, e.g. opc; else a new 'console' user)
 #   --minecraft     set this machine up as a Minecraft host (simpler menu, Minecraft first). --standard turns it off.
-#   --yes           never ask questions
+#   --reconfigure   run the setup wizard again on an existing install (mode, address, port)
+#   --yes           never ask questions (use the environment variables below to set things)
 # Environment
 #   CF_API_TOKEN              Cloudflare token (Zone:Read + DNS:Edit). Used once, never stored or printed.
 #   CONSOLE_ADMIN_PASSWORD    first install only. Otherwise a random one is generated and shown once.
+#   CONSOLE_GITHUB_TOKEN, CONSOLE_GITHUB_ORG, CONSOLE_TIMEZONE, CONSOLE_ALERT_WEBHOOK, CONSOLE_BACKUP_KEEP,
+#   CONSOLE_ENABLE_TERMINAL=1, CONSOLE_ENABLE_LINUX_USERS=1   first-run settings (the wizard asks for these;
+#                             with --yes you can pass them here). Never overwrite what you set in the dashboard.
 #
 # Works on Oracle Linux / RHEL-family (dnf) and Debian / Ubuntu (apt). Needs systemd and root.
 
@@ -40,6 +44,16 @@ CADDY_DIR="/etc/caddy"
 IP_ONLY=0
 MODE_FLAG="${CONSOLE_MODE_FLAG:-}"
 ASSUME_YES=0
+RECONFIGURE=0
+WIZ_ADMIN_USER=
+WIZ_GH_TOKEN=
+WIZ_GH_ORG=
+WIZ_TZ=
+WIZ_WEBHOOK=
+WIZ_KEEP=
+WIZ_TERMINAL=0
+WIZ_LINUX=0
+WIZ_RAN=0
 HAVE_TTY=0
 PM=""
 APT_UPDATED=0
@@ -48,12 +62,13 @@ PORT=3000
 PUBLIC_IP=""
 IS_OCI=0
 ADMIN_PW=""
+ADMIN_PW_PRESET=""
 ADMIN_PW_NOTE=""
 CF_TOKEN=""
 CERT_OK=0
 DNS_OK=0
 
-if [ -t 1 ]; then B=$'\033[1m'; G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; N=$'\033[0m'; else B=""; G=""; Y=""; R=""; N=""; fi
+if [ -t 1 ]; then B=$'\033[1m'; G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; C=$'\033[36m'; D=$'\033[2m'; N=$'\033[0m'; else B=""; G=""; Y=""; R=""; C=""; D=""; N=""; fi
 say()  { printf '\n%s==> %s%s\n' "$B" "$*" "$N"; }
 ok()   { printf '  %s✓%s %s\n' "$G" "$N" "$*"; }
 info() { printf '    %s\n' "$*"; }
@@ -76,6 +91,7 @@ Console installer. Run as root; safe to repeat.
   --dir PATH      where to install (default /opt/console)
   --user NAME     Linux user Console runs as (default: you, the user who ran sudo)
   --minecraft     set this machine up as a Minecraft host (--standard turns that off)
+  --reconfigure   run the setup wizard again on an existing install
   --yes           never ask questions
 EOF
 }
@@ -192,6 +208,7 @@ parse_args() {
       --user)     [ $# -ge 2 ] || die "--user needs a value"; USER_FLAG="$2"; shift 2 ;;
       --minecraft) MODE_FLAG=minecraft; shift ;;
       --standard) MODE_FLAG=standard; shift ;;
+      --reconfigure) RECONFIGURE=1; shift ;;
       --yes|-y)   ASSUME_YES=1; shift ;;
       -h|--help)  usage; exit 0 ;;
       *)          die "Unknown option: $1 (try --help)" ;;
@@ -240,6 +257,166 @@ choose_mode() {
     echo "  the record yourself. The token is used once and never saved.)"
     CF_TOKEN=$(ask_secret "  Cloudflare API token: ")
   fi
+}
+
+
+# ---- the setup wizard (only when a person is at the keyboard) ------------------------
+
+# Pure checks, unit-tested.
+valid_password() { [[ $1 =~ ^[A-Za-z0-9_.@%+,:=-]{10,}$ ]]; }
+valid_org()      { [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]]; }
+valid_hook()     { [[ $1 =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?/[^[:space:]]+$ ]] && [[ ${#1} -le 500 ]]; }
+valid_tz()       { [[ $1 =~ ^[A-Za-z0-9_+/-]{1,64}$ ]] && [[ $1 != *..* ]] && [ -e "/usr/share/zoneinfo/$1" ]; }
+valid_token()    { [[ $1 =~ ^[A-Za-z0-9_-]{20,255}$ ]]; }
+mask_tail()      { local s=$1; if [ "${#s}" -gt 6 ]; then printf '••••%s' "${s: -4}"; else printf '••••'; fi; }
+
+banner() {
+  printf '\n%s' "$C"
+  cat <<'ART'
+   ___                      _
+  / __|___ _ _  ___ ___| |___
+ | (__/ _ \ ' \(_-</ _ \ / -_)
+  \___\___/_||_/__/\___/_\___|
+ART
+  printf '%s  %sA friendly server manager. This takes about two minutes.%s\n' "$N" "$D" "$N"
+}
+
+WIZ_STEP=0; WIZ_TOTAL=5
+step() { WIZ_STEP=$((WIZ_STEP + 1)); printf '\n%s[%s/%s]%s %s%s%s\n' "$C" "$WIZ_STEP" "$WIZ_TOTAL" "$N" "$B" "$1" "$N"; }
+hint() { printf '    %s%s%s\n' "$D" "$*" "$N"; }
+
+ask_default() { # prompt default -> value
+  local a; a=$(ask "    $1 [$2]: "); printf '%s' "${a:-$2}"
+}
+yes_no() { # prompt default(y|n) -> 0 for yes
+  local def=$2 a hintstr="y/N"; [ "$def" = y ] && hintstr="Y/n"
+  a=$(ask "    $1 [$hintstr]: "); a=${a:-$def}
+  case "$a" in y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
+}
+
+wizard() {
+  local first=0 choice db
+  db=$(env_get CONSOLE_DB); db=${db:-$DIR/data/console.db}
+  [ -f "$db" ] || first=1
+  WIZ_RAN=1
+  [ "$first" -eq 1 ] && WIZ_TOTAL=5 || WIZ_TOTAL=2
+  banner
+
+  step "What is this machine for?"
+  if [ -z "$MODE_FLAG" ]; then
+    local saved; saved=$(env_get CONSOLE_MODE)
+    echo "      1) Minecraft host   simpler menu, Minecraft tools first (players, plugins, backups)"
+    echo "      2) General          any kind of server, bot, website or Docker app"
+    choice=$(ask_default "Pick one" "$([ "$saved" = minecraft ] && echo 1 || echo 2)")
+    case "$choice" in 1|m|M) MODE_FLAG=minecraft ;; *) MODE_FLAG=standard ;; esac
+  fi
+  ok "Mode: $([ "$MODE_FLAG" = minecraft ] && echo 'Minecraft host' || echo 'General')"
+
+  if [ "$first" -eq 1 ]; then
+    step "Your admin account"
+    hint "You'll sign in with this. Change it any time from the Account button."
+    WIZ_ADMIN_USER=$(ask_default "Username" "admin")
+    valid_username "$WIZ_ADMIN_USER" || [ "$WIZ_ADMIN_USER" = admin ] || { warn "Letters, numbers, - and _ only. Using 'admin'."; WIZ_ADMIN_USER=admin; }
+    if [ -z "$ADMIN_PW_PRESET" ]; then
+      if yes_no "Make up a strong password for me?" y; then
+        ok "I'll generate one and show it once at the end."
+      else
+        local p1 p2
+        while :; do
+          p1=$(ask_secret "    Password (10+ characters; letters, numbers, _ . @ % + , : = -): ")
+          if ! valid_password "$p1"; then warn "Too short, or it has a character I can't pass safely. Try again."; continue; fi
+          p2=$(ask_secret "    Type it again: ")
+          [ "$p1" = "$p2" ] && break
+          warn "They didn't match."
+        done
+        ADMIN_PW_PRESET=$p1
+        ok "Password set."
+      fi
+    fi
+  fi
+
+  step "Where will you open it?"
+  choose_mode
+  if [ -z "$PORT_FLAG" ] && [ -z "$(env_get PORT)" ] && [ -z "$DOMAIN" ]; then
+    local pt; pt=$(ask_default "Port" "3000")
+    if [[ $pt =~ ^[0-9]+$ ]] && [ "$pt" -ge 1 ] && [ "$pt" -le 65535 ]; then PORT=$pt; else warn "That isn't a valid port. Using 3000."; fi
+  fi
+
+  if [ "$first" -eq 1 ]; then
+    step "GitHub (optional)"
+    hint "Lets Console install plugins from your private repos and back servers up to GitHub."
+    hint "Make a token at https://github.com/settings/personal-access-tokens (Contents: read & write)."
+    local t
+    t=$(ask_secret "    Token (Enter to skip): ")
+    if [ -n "$t" ]; then
+      if valid_token "$t"; then WIZ_GH_TOKEN=$t; ok "Token saved ($(mask_tail "$t"))"; else warn "That doesn't look like a GitHub token, skipping. Add it later in Settings."; fi
+    fi
+    if [ -n "$WIZ_GH_TOKEN" ] || yes_no "Do you have a GitHub org or user whose repos hold your plugins?" n; then
+      local o; o=$(ask "    Org or username (Enter to skip): ")
+      if [ -n "$o" ]; then if valid_org "$o"; then WIZ_GH_ORG=$o; else warn "That isn't a valid GitHub name, skipping."; fi; fi
+    fi
+
+    step "Extras (all optional)"
+    local tz; tz=$(timedatectl show -p Timezone --value 2>/dev/null || true)
+    tz=$(ask_default "Time zone for schedules" "${tz:-UTC}")
+    if valid_tz "$tz"; then WIZ_TZ=$tz; else warn "Unknown time zone, leaving it for later."; fi
+    local k; k=$(ask_default "Backups to keep per server" "7")
+    if [[ $k =~ ^[0-9]+$ ]] && [ "$k" -ge 1 ] && [ "$k" -le 50 ]; then WIZ_KEEP=$k; fi
+    local w; w=$(ask "    Discord/Slack webhook for down alerts (Enter to skip): ")
+    if [ -n "$w" ]; then if valid_hook "$w"; then WIZ_WEBHOOK=$w; ok "Alerts on"; else warn "Needs to be an https:// URL. Skipping."; fi; fi
+    hint "Advanced tools give admins a shell in the browser. Leave them off unless you want them."
+    if yes_no "Turn on the web terminal?" n; then WIZ_TERMINAL=1; fi
+    if yes_no "Turn on Linux user management?" n; then WIZ_LINUX=1; fi
+  fi
+
+  printf '\n%s%s%s\n' "$B" "Ready to install" "$N"
+  echo "    Mode:      $([ "$MODE_FLAG" = minecraft ] && echo 'Minecraft host' || echo 'General')"
+  [ "$first" -eq 1 ] && echo "    Admin:     $WIZ_ADMIN_USER ($([ -n "$ADMIN_PW_PRESET" ] && echo 'your password' || echo 'generated password'))"
+  echo "    Address:   $([ -n "$DOMAIN" ] && echo "https://$DOMAIN" || echo "http://${PUBLIC_IP:-<ip>}:$PORT")"
+  [ -n "$WIZ_GH_TOKEN" ] && echo "    GitHub:    token $(mask_tail "$WIZ_GH_TOKEN")${WIZ_GH_ORG:+, org $WIZ_GH_ORG}"
+  [ -n "$WIZ_TZ$WIZ_KEEP" ] && echo "    Schedules: ${WIZ_TZ:-default zone}, keep ${WIZ_KEEP:-7} backups"
+  [ -n "$WIZ_WEBHOOK" ] && echo "    Alerts:    webhook set"
+  [ "$WIZ_TERMINAL$WIZ_LINUX" != 00 ] && echo "    Advanced:  $([ "$WIZ_TERMINAL" = 1 ] && echo 'terminal ')$([ "$WIZ_LINUX" = 1 ] && echo 'linux-users')"
+  echo
+  yes_no "Go?" y || die "Cancelled. Nothing was changed."
+}
+
+# Hand the wizard's answers to Console through the env file; Console applies each one once, only where nothing is saved yet.
+write_wizard_env() {
+  [ -z "$WIZ_ADMIN_USER" ] || env_set CONSOLE_ADMIN_USER "$WIZ_ADMIN_USER"
+  [ -z "$WIZ_GH_TOKEN" ] || env_set CONSOLE_GITHUB_TOKEN "$WIZ_GH_TOKEN"
+  [ -z "$WIZ_GH_ORG" ] || env_set CONSOLE_GITHUB_ORG "$WIZ_GH_ORG"
+  [ -z "$WIZ_TZ" ] || env_set CONSOLE_TIMEZONE "$WIZ_TZ"
+  [ -z "$WIZ_KEEP" ] || env_set CONSOLE_BACKUP_KEEP "$WIZ_KEEP"
+  [ -z "$WIZ_WEBHOOK" ] || env_set CONSOLE_ALERT_WEBHOOK "$WIZ_WEBHOOK"
+  [ "$WIZ_TERMINAL" != 1 ] || env_set CONSOLE_ENABLE_TERMINAL 1
+  [ "$WIZ_LINUX" != 1 ] || env_set CONSOLE_ENABLE_LINUX_USERS 1
+  return 0
+}
+clear_wizard_env() {
+  local k
+  for k in CONSOLE_GITHUB_TOKEN CONSOLE_GITHUB_ORG CONSOLE_TIMEZONE CONSOLE_BACKUP_KEEP CONSOLE_ALERT_WEBHOOK CONSOLE_ENABLE_TERMINAL CONSOLE_ENABLE_LINUX_USERS; do env_del "$k"; done
+}
+
+# Runs a command with a spinner; shows the tail of its output only if it fails.
+spin() { # message cmd args...
+  local msg=$1; shift
+  local log pid i=0 frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' rc=0
+  log=$(mktemp)
+  "$@" >"$log" 2>&1 &
+  pid=$!
+  if [ -t 1 ]; then
+    while kill -0 "$pid" 2>/dev/null; do
+      printf '\r  %s%s%s %s' "$C" "${frames:$((i % 10)):1}" "$N" "$msg"
+      i=$((i + 1)); sleep 0.1
+    done
+    printf '\r\033[K'
+  fi
+  wait "$pid" || rc=$?
+  if [ "$rc" -eq 0 ]; then ok "$msg"; else
+    warn "$msg failed. Last lines:"; tail -n 20 "$log" >&2; rm -f "$log"; return "$rc"
+  fi
+  rm -f "$log"
 }
 
 # ---- system setup ------------------------------------------------------------------
@@ -328,10 +505,8 @@ fetch_code() {
 }
 
 build_app() {
-  info "Installing dependencies and building the dashboard..."
-  as_svc npm --prefix "$DIR" install --no-package-lock --no-audit --no-fund --loglevel=error
-  as_svc npm --prefix "$DIR" run build --silent
-  ok "Built"
+  spin "Installing dependencies" as_svc npm --prefix "$DIR" install --no-package-lock --no-audit --no-fund --loglevel=error
+  spin "Building the dashboard" as_svc npm --prefix "$DIR" run build --silent
 }
 
 # First run only: make sure there's an admin password to create the account with.
@@ -374,7 +549,7 @@ install_service() {
     die "Console didn't start. The last log lines are above."
   fi
   # The password is only needed for the very first start. Don't keep it lying around.
-  if [ -f "$(env_get CONSOLE_DB)" ]; then env_del CONSOLE_ADMIN_PASSWORD; fi
+  if [ -f "$(env_get CONSOLE_DB)" ]; then env_del CONSOLE_ADMIN_PASSWORD; clear_wizard_env; fi
 }
 
 # ---- network ------------------------------------------------------------------------
@@ -557,6 +732,8 @@ setup_domain() {
 
 # ---- final report ----------------------------------------------------------------------
 
+is_mc_mode() { [ "$MODE_FLAG" = minecraft ] || { [ "$MODE_FLAG" != standard ] && [ "$(env_get CONSOLE_MODE)" = minecraft ]; }; }
+
 print_summary() {
   local sha url ports src
   sha=$(as_svc git -C "$DIR" rev-parse --short HEAD 2>/dev/null || echo "?")
@@ -584,9 +761,17 @@ print_summary() {
   if [ "$IS_OCI" -eq 1 ]; then
     echo "  One thing only you can do (Oracle blocks everything by default):"
     echo "    Oracle Cloud console > Networking > Virtual Cloud Networks > your VCN > Security Lists"
-    echo "    > Add Ingress Rules:  Source CIDR $src   Protocol TCP   Destination port $ports"
+    echo "    > Add Ingress Rules:"
+    echo "        Source CIDR $src   Protocol TCP   Destination port $ports   (the dashboard)"
+    if is_mc_mode; then echo "        Source CIDR 0.0.0.0/0   Protocol TCP   Destination port 25565   (Minecraft players)"; fi
   else
     echo "  If the page doesn't load, open TCP $ports in your cloud provider's firewall / security group."
+    if is_mc_mode; then echo "  Players need TCP 25565 open there too."; fi
+  fi
+  if is_mc_mode; then
+    echo
+    echo "  Next: open Create > Minecraft, pick a version, accept the EULA, and press Start."
+    echo "        Players join at ${PUBLIC_IP:-<your-server-ip>}:25565"
   fi
   if [ -n "$DOMAIN" ] && [ "$CERT_OK" -eq 0 ]; then
     echo
@@ -617,9 +802,14 @@ main() {
   detect_cloud
   find_public_ip || warn "Couldn't look up this server's public IP."
 
-  say "Console installer"
   PORT=${PORT_FLAG:-$(env_get PORT)}; PORT=${PORT:-3000}
-  choose_mode
+  local first_run=0; [ -f "$(env_get CONSOLE_DB || true)" ] || [ -f "$DIR/data/console.db" ] || first_run=1
+  if [ "$HAVE_TTY" -eq 1 ] && { [ "$first_run" -eq 1 ] || [ "$RECONFIGURE" -eq 1 ]; }; then
+    wizard
+  else
+    say "Console installer"
+    choose_mode
+  fi
   if [ -n "$DOMAIN" ]; then info "Mode: HTTPS at https://$DOMAIN"; else info "Mode: plain HTTP on port $PORT (no domain)"; fi
 
   say "Installing what's needed"
@@ -633,6 +823,7 @@ main() {
 
   say "Configuring"
   write_env
+  write_wizard_env
   prepare_admin
   ok "Wrote $ENV_FILE"
 
@@ -646,6 +837,7 @@ main() {
     drop_caddy_site
     open_ports "$PORT"
   fi
+  if is_mc_mode; then say "Minecraft"; open_ports 25565; fi
 
   print_summary
 }

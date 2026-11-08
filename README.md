@@ -24,6 +24,10 @@ Dev mode with hot reload (two terminals): `npm run dev:server` and `npm run dev:
 
 Tests: `npm test`
 
+## Setup wizard
+
+Run the install command in a terminal and it walks you through five short steps: what the machine is for (Minecraft host or general), your admin account (type a password or let it generate one), your address (domain + HTTPS, or IP and port), GitHub (token and org), and extras (time zone, backups to keep, a Discord/Slack alert webhook, the advanced web terminal and Linux-user tools). It shows a summary and asks before it changes anything. Run it again with `--reconfigure` to change mode or address later. With `--yes` (or no terminal) it asks nothing; pass the same choices as environment variables: `CONSOLE_ADMIN_PASSWORD`, `CONSOLE_GITHUB_TOKEN`, `CONSOLE_GITHUB_ORG`, `CONSOLE_TIMEZONE`, `CONSOLE_ALERT_WEBHOOK`, `CONSOLE_BACKUP_KEEP`, `CONSOLE_ENABLE_TERMINAL=1`, `CONSOLE_ENABLE_LINUX_USERS=1`. Console applies these once on first start, only where nothing is saved yet, then the installer removes them from `/etc/console.env`.
+
 ## What you can do
 
 | | |

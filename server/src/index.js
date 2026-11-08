@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { openDb, syncServers } from "./db.js";
 import { ensureAdmin } from "./auth.js";
+import { seedSettings } from "./seed.js";
 import { buildApp } from "./app.js";
 import { updater } from "./updater.js";
 import { createServices } from "./services.js";
@@ -36,6 +37,9 @@ if (admin) {
   console.log(`  username: ${admin.username}`);
   console.log(admin.generated ? `  password: ${admin.password}   (shown once, save it)\n` : "  password: from CONSOLE_ADMIN_PASSWORD\n");
 }
+
+const seeded = seedSettings(db);
+if (seeded.length) console.log(`Applied setup choices: ${seeded.join(", ")}`);
 
 const loopback = ["127.0.0.1", "::1", "localhost"].includes(HOST);
 if (!loopback && process.env.CONSOLE_SECURE_COOKIES !== "1") {
