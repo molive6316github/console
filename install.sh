@@ -1232,8 +1232,8 @@ print_summary() {
 # So "mxt-console run" works from anywhere afterwards (it fetches the latest installer through npx).
 install_cli_shim() {
   command -v npx >/dev/null 2>&1 || return 0
-  [ -e /usr/local/bin/mxt-console ] && ! grep -q "managed by Console" /usr/local/bin/mxt-console 2>/dev/null && return 0
-  printf '#!/bin/sh\n# managed by Console\nexec npx -y mxt-console@latest "$@"\n' > /usr/local/bin/mxt-console && chmod 0755 /usr/local/bin/mxt-console || true
+  [ -e /usr/bin/mxt-console ] && ! grep -q "managed by Console" /usr/bin/mxt-console 2>/dev/null && return 0
+  printf '#!/bin/sh\n# managed by Console\nexec npx -y mxt-console@latest "$@"\n' > /usr/bin/mxt-console && chmod 0755 /usr/bin/mxt-console || true
 }
 
 uninstall_main() {
@@ -1252,7 +1252,7 @@ uninstall_main() {
     if systemctl is-active --quiet caddy; then systemctl reload caddy || true; fi
   fi
   rm -f "$ENV_FILE"
-  grep -q "managed by Console" /usr/local/bin/mxt-console 2>/dev/null && rm -f /usr/local/bin/mxt-console
+  grep -q "managed by Console" /usr/bin/mxt-console 2>/dev/null && rm -f /usr/bin/mxt-console
   case "$DIR" in /|/opt|/usr|/home|/root|"") die "Refusing to delete $DIR" ;; esac
   rm -rf "$DIR"
   ok "Console is removed. To put it back: sudo npx -y mxt-console@latest install"
