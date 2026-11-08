@@ -211,7 +211,7 @@ export function buildApp({
   setupRoutes(app, { ...ctx, setups: services.setups, jobs: services.jobs });
   terminalRoutes(app, { ...ctx, terminal: services.terminal });
   mcRoutes(app, { ...ctx, mc: services.mc });
-  statusRoutes(app, { ...ctx, mc: services.mc, startup: services.startup });
+  statusRoutes(app, { ...ctx, mc: services.mc, startup: services.startup, stats: services.stats, setups: services.setups, jobs: services.jobs });
   inviteRoutes(app, { ...ctx, cookie: { name: COOKIE, secure: secureCookies } });
   linuxRoutes(app, { ...ctx, linux: services.linux, featureOn: () => getSetting(db, "linux_users_enabled", "0") === "1" });
 

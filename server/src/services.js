@@ -8,15 +8,18 @@ import { createScheduler } from "./scheduler.js";
 import os from "node:os";
 import { createJobs } from "./jobs.js";
 import { createSetups } from "./setups/index.js";
-import { getServer, getSetting, setSetting } from "./db.js";
+import { getServer, getSetting, setSetting, listServers } from "./db.js";
 import { createStartup, restartCrons } from "./mc/startup.js";
+import { createStats } from "./mc/stats.js";
+import { mcRoot } from "./mc/index.js";
 import { getDriver } from "./drivers/index.js";
+import { run as runCmd } from "./drivers/exec.js";
 import { createTerminal } from "./terminal.js";
 import { createLinuxUsers } from "./linuxusers.js";
 import { createMc } from "./mc/index.js";
 
 // Wires the long-lived pieces together. Nothing runs on a timer until start() is called.
-export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverOptions = {}, setupOptions = {}, terminalOptions = {}, linuxOptions = {} } = {}) {
+export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverOptions = {}, setupOptions = {}, terminalOptions = {}, linuxOptions = {}, mcOptions = {} } = {}) {
   const dir = dataDir ?? path.resolve("data");
   const runtime = createRuntime({ db, dataDir: dir });
   const extraRoots = (process.env.CONSOLE_SCAN_DIRS ?? "").split(":").filter((d) => d.startsWith("/"));
@@ -52,10 +55,15 @@ export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverO
   });
   const mc = createMc({ runtime, fetchImpl, getToken: () => getSetting(db, "github_token", "") || "", getMeta: (id) => setups.metaOf(id),
     jobs,
+    saveMeta: (id, m) => setSetting(db, `app.${id}`, JSON.stringify(m)),
+    saveTarget: (id, target) => db.prepare("UPDATE servers SET target = ? WHERE id = ?").run(JSON.stringify(target), id),
+    validateTarget: (type, target) => getDriver(type).validate(target),
+    run: runCmd,
     getJoin: () => ({ domain: getSetting(db, "join_domain", ""), srv: getSetting(db, "join_srv", "0") === "1", ip: process.env.CONSOLE_PUBLIC_IP || "" }),
     cfgGet: (id) => { try { return JSON.parse(getSetting(db, `mcgh.${id}`, "") || "null"); } catch { return null; } },
     cfgSet: (id, v) => setSetting(db, `mcgh.${id}`, JSON.stringify(v)),
     dataDir: dir,
+    ...mcOptions,
   });
   mcRef = mc;
   const startup = createStartup({
@@ -76,6 +84,14 @@ export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverO
     now: now ?? (() => Date.now()),
   });
   startupRef = startup;
+  const stats = createStats({
+    paneRun: async (session) => (await runCmd("tmux", ["display-message", "-p", "-t", `=${session}:`, "#{pane_pid}"])).stdout,
+    cores: os.cpus().length || 1,
+  });
+  let statsTimer = null;
+  const sampleAll = () => {
+    for (const sv of listServers(db)) if (sv.type === "tmux" && mcRoot(sv)) stats.sample(sv).catch(() => {});
+  };
   return {
     runtime,
     discover,
@@ -88,14 +104,20 @@ export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverO
     linux,
     mc,
     startup,
+    stats,
     start({ monitorSec = 60 } = {}) {
       scheduler.start();
-      if (monitorSec > 0) monitor.start(monitorSec * 1000);
+      if (monitorSec > 0) {
+        monitor.start(monitorSec * 1000);
+        statsTimer = setInterval(sampleAll, 10_000);
+        statsTimer.unref?.();
+      }
     },
     stop() {
       terminal.closeAll("Console is shutting down");
       scheduler.stop();
       monitor.stop();
+      clearInterval(statsTimer);
     },
   };
 }

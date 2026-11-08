@@ -9,6 +9,7 @@ import { pauseSaves } from "./savehooks.js";
 import { restoreBackup, resetWorld } from "./worlds.js";
 import { pushConfig, pushWorld, repoOf } from "./github.js";
 import { ping } from "./slp.js";
+import { createVersions } from "./versions.js";
 import { parse } from "./props.js";
 import { tokenSecrets } from "../gitutil.js";
 import { BACKUP_NAME } from "../backups.js";
@@ -40,7 +41,7 @@ async function readJson(file) {
   }
 }
 
-export function createMc({ runtime, listWaitMs = 900, fetchImpl = fetch, getToken, getMeta, jobs, getJoin = () => ({}), pingImpl = ping, cfgGet = () => null, cfgSet = () => {}, dataDir = "/tmp/console-mc", saveWaitMs = 30_000 }) {
+export function createMc({ saveMeta = () => {}, saveTarget = () => {}, validateTarget = (_t, x) => x, run = async () => ({ code: 1, stdout: "", stderr: "" }), versionDeps = {}, runtime, listWaitMs = 900, fetchImpl = fetch, getToken, getMeta, jobs, getJoin = () => ({}), pingImpl = ping, cfgGet = () => null, cfgSet = () => {}, dataDir = "/tmp/console-mc", saveWaitMs = 30_000 }) {
   const plugins = createPlugins({ fetchImpl, getToken, getMeta });
   const rootKind = (server) => {
     const root = mcRoot(server);
@@ -118,6 +119,13 @@ export function createMc({ runtime, listWaitMs = 900, fetchImpl = fetch, getToke
     if (confirm !== server.id) throw new McError(`Type the server ID (${server.id}) to confirm`, 400);
   };
 
+  const versions = createVersions({ jobs, fetchImpl, runtime, getMeta, saveMeta, saveTarget, validateTarget, run, mustBeStopped, needConfirm, ...versionDeps });
+  async function switchVersion(server, body, actor) {
+    const root = mcRoot(server);
+    if (!root) throw new McError("This isn't a Minecraft server", 404);
+    return versions.switchTo(server, root, body ?? {}, actor);
+  }
+
   async function restore(server, name, confirm) {
     const root = mcRoot(server);
     if (!root) throw new McError("This isn't a Minecraft server", 404);
@@ -145,6 +153,15 @@ export function createMc({ runtime, listWaitMs = 900, fetchImpl = fetch, getToke
     } finally {
       runtime.busy.delete(server.id);
     }
+  }
+
+  // Asks the console for TPS and returns the last lines. Paper/Purpur: `tps`. Vanilla: `tick query`.
+  async function readTps(server, flavor) {
+    const driver = getDriver(server.type);
+    if (!driver.send || !driver.logs) return null;
+    await driver.send(server.target, flavor === "vanilla" ? "tick query" : "tps", { id: server.id });
+    await sleep(listWaitMs);
+    return driver.logs(server.target, 30);
   }
 
   // What players type to join: your domain (no port when an SRV record covers it), else the public IP, with :port when it isn't 25565.
@@ -220,7 +237,7 @@ export function createMc({ runtime, listWaitMs = 900, fetchImpl = fetch, getToke
   }
 
   return {
-    getProps, setProps, players, act, liveStatus, joinInfo, safeBackup, restore, reset, gh, scheduled,
+    getProps, setProps, players, act, liveStatus, joinInfo, safeBackup, switchVersion, readTps, runtimeStatus: (x) => runtime.status(x).catch(() => "unknown"), restore, reset, gh, scheduled,
     plugins: {
       kind: (server) => rootKind(server).kind,
       list: async (server) => { const { root, kind } = rootKind(server); return { kind, files: await plugins.list(root, kind) }; },
