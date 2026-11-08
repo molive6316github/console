@@ -6,6 +6,7 @@ import { followJob } from "../views/create.js";
 import { accountView } from "../views/account.js";
 import { settingsView } from "../views/settings.js";
 import { updatesView } from "../views/updates.js";
+import { machinePage } from "./system.js";
 import { overviewPage, startupPage, versionPage, peoplePage, joinPage } from "./pages.js";
 
 // The Minecraft-mode app: one server, a sidebar, nothing generic.
@@ -49,6 +50,7 @@ export function startPanel(app, me, { signOut }) {
       { id: "join", icon: "⌁", label: "Join address & status page", show: isOwner, render: joinPage },
       { id: "activity", icon: "≡", label: "Activity", show: has("activity"), render: (box, o) => activityTab(box, o) },
       { sep: "Panel", show: true },
+      { id: "machine", icon: "▥", label: "Machine & logs", show: isOwner, render: machinePage },
       { id: "panel-settings", icon: "☰", label: "Panel settings", show: isOwner, render: (box, o) => settingsView(box, o) },
       { id: "updates", icon: "↑", label: "Updates", show: isOwner, render: (box, o) => updatesView(box, o) },
       { id: "account", icon: "◉", label: "Account", show: true, render: (box, o) => accountView(box, o) },
@@ -63,7 +65,7 @@ export function startPanel(app, me, { signOut }) {
 
   async function loadServer() {
     const list = await api("/servers");
-    const first = list.find((s) => s.mc) ?? list[0];
+    const first = list.find((s) => s.mc); // the panel is for the Minecraft server only
     server = first ? await api(`/servers/${encodeURIComponent(first.id)}`) : null;
   }
 

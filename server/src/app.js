@@ -19,6 +19,8 @@ import { linuxRoutes } from "./routes/linux.js";
 import { mcRoutes } from "./routes/mc.js";
 import { inviteRoutes } from "./routes/invites.js";
 import { statusRoutes } from "./routes/status.js";
+import { systemRoutes } from "./routes/system.js";
+import { createSystem, createLogRing } from "./system.js";
 import { hasPerm, PERMS, PRESETS } from "./perms.js";
 import { getSetting } from "./db.js";
 import {
@@ -49,6 +51,8 @@ export function buildApp({
   canRestart = () => Boolean(process.env.INVOCATION_ID || process.env.CONSOLE_SUPERVISED === "1"),
   onRestart = () => process.exit(75),
   restartDelayMs = 800,
+  system = null,
+  logRing = createLogRing(),
   autoUpdateEveryMs = 0, // index.js turns this on; tests leave it off
   dataDir = process.env.CONSOLE_DATA || path.resolve(here, "../../data"),
   services = createServices({ db, dataDir }),
@@ -247,6 +251,15 @@ export function buildApp({
   terminalRoutes(app, { ...ctx, terminal: services.terminal });
   mcRoutes(app, { ...ctx, mc: services.mc });
   statusRoutes(app, { ...ctx, mc: services.mc, startup: services.startup, stats: services.stats, setups: services.setups, jobs: services.jobs });
+  const playersOnline = async () => {
+    for (const sv of listServers(db)) {
+      if (!mcRoot(sv)) continue;
+      const st = await services.mc.liveStatus(sv).catch(() => null);
+      if (st?.online && st.players?.online > 0) return true;
+    }
+    return false;
+  };
+  systemRoutes(app, { ...ctx, system: system ?? createSystem({ jobs: services.jobs }), logs: logRing, jobs: services.jobs, onlinePlayers: playersOnline });
   inviteRoutes(app, { ...ctx, cookie: { name: COOKIE, secure: secureCookies } });
   linuxRoutes(app, { ...ctx, linux: services.linux, featureOn: () => getSetting(db, "linux_users_enabled", "0") === "1" });
 

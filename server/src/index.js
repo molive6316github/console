@@ -7,6 +7,10 @@ import { seedSettings } from "./seed.js";
 import { buildApp } from "./app.js";
 import { updater } from "./updater.js";
 import { createServices } from "./services.js";
+import { createLogRing } from "./system.js";
+
+const logRing = createLogRing(); // keeps the last few hundred log lines so the dashboard can show them
+logRing.capture();
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
@@ -69,6 +73,7 @@ const app = buildApp({
   secureCookies: process.env.CONSOLE_SECURE_COOKIES === "1",
   logger: process.env.CONSOLE_LOG === "1",
   autoUpdateEveryMs: 10 * 60_000,
+  logRing,
 });
 
 app.listen({ port: PORT, host: HOST }).then(
