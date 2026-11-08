@@ -18,6 +18,7 @@ export function startPanel(app, me, { signOut }) {
   const side = h("nav", { class: "side" });
   const main = h("main", { class: "pmain" });
   const head = h("div", { class: "phead" });
+  const badge = h("span", { class: "badgebox" });
   let menuBtn;
   const shell = h("div", { class: "panelapp" },
     h("aside", { class: "sidebar", id: "sidebar" },
@@ -25,7 +26,7 @@ export function startPanel(app, me, { signOut }) {
       side,
       h("div", { class: "who" }, h("span", {}, `${me.username}${isOwner ? " · owner" : ""}`), h("button", { onclick: signOut }, "Sign out"))),
     h("div", { class: "pbody" },
-      h("div", { class: "topbar" }, (menuBtn = h("button", { class: "burger", "aria-label": "Menu", onclick: () => shell.classList.toggle("open") }, "☰")), head),
+      h("div", { class: "topbar" }, (menuBtn = h("button", { class: "burger", "aria-label": "Menu", onclick: () => shell.classList.toggle("open") }, "☰")), head, badge),
       main)
   );
   app.replaceChildren(shell);
@@ -150,6 +151,11 @@ export function startPanel(app, me, { signOut }) {
     );
   }
 
+  if (isOwner) {
+    api("/update").then((u) => {
+      if (u?.ok && u.behind > 0) badge.replaceChildren(h("a", { class: "updatebadge", href: "#/updates" }, u.latestVersion ? `Update ${u.latestVersion} ready` : "Update ready"));
+    }).catch(() => {});
+  }
   window.addEventListener("hashchange", onHash);
   function onHash() {
     if (!app.contains(shell)) return window.removeEventListener("hashchange", onHash);

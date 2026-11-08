@@ -1,4 +1,4 @@
-import { h, api, sleep } from "../ui.js";
+import { h, api, sleep, toast } from "../ui.js";
 
 // After an update the server restarts. Its bootId changes when the new process is up.
 async function waitForRestart(oldBoot, statusEl) {
@@ -88,6 +88,16 @@ export function updatesView(box, { me, onInfo }) {
       h("div", { class: "stack wide" }, h("label", { class: "check" }, on, "Update Console automatically every night"), h("label", { class: "field" }, h("span", {}, "Time"), hour), msg,
         h("small", { class: "muted" }, a.channel === "release" ? "It only installs versions that have been published as releases, never half-finished work. If the build fails it rolls back by itself, and you get an alert either way." : "Following the main branch directly.")));
   }).catch(() => {});
-  box.append(h("div", { class: "titlebar" }, h("h1", {}, "Updates")), h("div", { class: "panel" }, status, list, h("div", { class: "row" }, checkBtn, goBtn), log), autoBox);
+  box.append(h("div", { class: "titlebar" }, h("h1", {}, "Updates")), h("div", { class: "panel" }, status, list, h("div", { class: "row" }, checkBtn, goBtn), log), autoBox,
+    h("div", { class: "panel" }, h("h2", {}, "Restart"), h("p", { class: "muted" }, "Restarts Console only. Your Minecraft server keeps running."),
+      h("button", { onclick: async () => {
+        if (!confirm("Restart Console now?")) return;
+        try {
+          const r = await api("/restart", { method: "POST", body: {} });
+          if (!r.restarting) return toast("Console wasn't started in a way that can restart itself. Stop it and start it again.", true);
+          toast("Restarting…");
+          await waitForRestart(me.bootId, status);
+        } catch (err) { toast(err.message, true); }
+      } }, "Restart Console")));
   runCheck(false);
 }

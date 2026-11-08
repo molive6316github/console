@@ -1,6 +1,6 @@
 {
   "name": "mxt-console",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "type": "module",
   "description": "Web dashboard for starting, stopping and watching all kinds of servers. One-click Minecraft, Docker and Node setups, backups, schedules.",
   "engines": {
@@ -10,7 +10,7 @@
     "dev:server": "node --watch server/src/index.js",
     "dev:web": "vite web",
     "build": "vite build web",
-    "start": "node server/src/index.js",
+    "start": "node bin/supervise.js",
     "test": "node --test \"server/test/*.test.js\"",
     "prepack": "npm run build"
   },

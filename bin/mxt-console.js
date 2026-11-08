@@ -90,7 +90,7 @@ if (args.includes("--version") || args.includes("-v") || cmd === "version") {
     process.exit(1);
   }
   console.log(`mxt-console ${pkg.version}  data: ${dir}`);
-  await import("../server/src/index.js");
+  (await import("./supervise.js")).supervise();
 } else {
   console.error(`Unknown command: ${cmd}\n\n${HELP}`);
   process.exit(2);

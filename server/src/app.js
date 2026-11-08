@@ -46,7 +46,7 @@ export function buildApp({
   updater = defaultUpdater,
   // After an update the process exits with a non-zero code so systemd (Restart=on-failure) brings it back.
   // Outside systemd there is nothing to bring it back, so we only exit when INVOCATION_ID is set.
-  canRestart = () => Boolean(process.env.INVOCATION_ID),
+  canRestart = () => Boolean(process.env.INVOCATION_ID || process.env.CONSOLE_SUPERVISED === "1"),
   onRestart = () => process.exit(75),
   restartDelayMs = 800,
   autoUpdateEveryMs = 0, // index.js turns this on; tests leave it off
