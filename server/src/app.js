@@ -24,6 +24,8 @@ import { dnsRoutes } from "./routes/dns.js";
 import { claudeCodeRoutes } from "./routes/claudecode.js";
 import { createClaudeCode } from "./claudecode.js";
 import { siteRoutes } from "./routes/sites.js";
+import { nsRoutes } from "./routes/ns.js";
+import { createNsConfig, createAuthority, createNameserverServer } from "./nameserver.js";
 import { createSites } from "./sites.js";
 import { run as runCmd } from "./drivers/exec.js";
 import { createSystem, createLogRing } from "./system.js";
@@ -60,6 +62,7 @@ export function buildApp({
   system = null,
   dnsOptions = null,
   siteOptions = null,
+  nsOptions = null,
   claudeOptions = null,
   logRing = createLogRing(),
   autoUpdateEveryMs = 0, // index.js turns this on; tests leave it off
@@ -280,6 +283,26 @@ export function buildApp({
     return false;
   };
   systemRoutes(app, { ...ctx, system: system ?? createSystem({ jobs: services.jobs }), logs: logRing, jobs: services.jobs, onlinePlayers: playersOnline });
+  // Console as its own nameserver (off until turned on). Hosts come from the panel domain, the join address and websites.
+  let nsRef = null;
+  const nsConfig = createNsConfig({
+    db,
+    publicIp: () => process.env.CONSOLE_PUBLIC_IP || "",
+    knownHosts: () => {
+      const out = [];
+      const add = (name, srvPort) => { if (name && !out.some((h) => h.name === name.toLowerCase())) out.push({ name: name.toLowerCase(), srvPort }); };
+      add(process.env.CONSOLE_DOMAIN);
+      const join = getSetting(db, "join_domain", "");
+      add(join, nsRef?.portOfHost(join));
+      try { for (const s of JSON.parse(getSetting(db, "sites", "[]"))) add(s.host); } catch { /* none */ }
+      return out;
+    },
+    ...(nsOptions?.config ?? {}),
+  });
+  const nsServer = createNameserverServer({ authority: createAuthority({ getConfig: () => nsConfig.get() }), port: parseInt(process.env.CONSOLE_NS_PORT ?? "53", 10), ...(nsOptions?.server ?? {}) });
+  const ns = nsRoutes(app, { ...ctx, mc: services.mc, nsConfig, nsServer, run: runCmd, publicIp: () => process.env.CONSOLE_PUBLIC_IP, ...(nsOptions?.routes ?? {}) });
+  app.addHook("onClose", async () => { await nsServer.stop(); });
+  nsRef = ns;
   siteRoutes(app, { ...ctx, sites });
   claudeCodeRoutes(app, { ...ctx, claude: createClaudeCode({ db, jobs: services.jobs, run: runCmd, ...(claudeOptions ?? {}) }) });
   dnsRoutes(app, { ...ctx, mc: services.mc, publicIp: () => process.env.CONSOLE_PUBLIC_IP, ...(dnsOptions ?? {}) });

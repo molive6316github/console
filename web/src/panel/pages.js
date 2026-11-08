@@ -1,6 +1,7 @@
 import { h, svg, api, toast, field, bytes } from "../ui.js";
 import { followJob } from "../views/create.js";
 import { act } from "../views/servers.js";
+import { nsCard } from "./nsbox.js";
 
 const base = (s) => `/servers/${encodeURIComponent(s.id)}/mc`;
 
@@ -323,13 +324,14 @@ export async function joinPage(box, { server, life }) {
       msg.textContent = e.message;
     }
   };
-  const dnsBox = h("div", { class: "panel" }, h("h2", {}, "DNS records"), h("div", { class: "muted" }, "Loading…"));
+  const dnsBox = h("div", { class: "panel" }, h("h2", {}, "DNS records (normal DNS)"), h("div", { class: "muted" }, "Loading…"));
   const provBox = h("div", { class: "panel" });
   box.append(
     h("div", { class: "panel" },
       h("h2", {}, "Join address"),
       j.address ? h("div", { class: "row tight" }, h("code", { class: "bigaddr" }, j.address), h("button", { onclick: () => copyText(j.address) }, "Copy")) : h("p", { class: "muted" }, "No address yet."),
       h("div", { class: "stack wide" }, field("Your domain (optional)", domain, "Like play.yourname.com. Save it and the exact DNS records appear below, ready to copy."), h("div", { class: "row" }, h("button", { class: "primary", onclick: save }, "Save domain")))),
+    nsCard(),
     dnsBox,
     provBox,
     h("div", { class: "panel" },

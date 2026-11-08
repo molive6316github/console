@@ -18,5 +18,8 @@ KillMode=process
 
 NoNewPrivileges=true
 
+# Lets Console's built-in nameserver listen on port 53 without being root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
 [Install]
 WantedBy=multi-user.target
