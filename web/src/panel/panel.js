@@ -61,8 +61,9 @@ export function startPanel(app, me, { signOut }) {
 
   const route = () => location.hash.replace(/^#\/?/, "").split("/")[0] || "overview";
 
-  function drawSide(current) {
-    side.replaceChildren(...PAGES().map((p) => (p.sep ? h("div", { class: "sep" }, p.sep) : h("a", { href: `#/${p.id}`, class: p.id === current ? "on" : "" }, h("span", { class: "ico" }, p.icon), p.label))));
+  const NO_SERVER_PAGES = ["machine", "panel-settings", "updates", "account"];
+  function drawSide(current, list = PAGES()) {
+    side.replaceChildren(...list.map((p) => (p.sep ? h("div", { class: "sep" }, p.sep) : h("a", { href: `#/${p.id}`, class: p.id === current ? "on" : "" }, h("span", { class: "ico" }, p.icon), p.label))));
   }
 
   async function loadServer() {
@@ -92,7 +93,18 @@ export function startPanel(app, me, { signOut }) {
     }
     drawHead();
     if (!server) {
-      drawSide("");
+      // Even before there's a server, the panel-level pages (updates, machine, account) must work.
+      const extra = isOwner ? PAGES().filter((p) => NO_SERVER_PAGES.includes(p.id) || p.sep === "Panel") : PAGES().filter((p) => p.id === "account");
+      const list = [{ id: "overview", icon: "▣", label: "Create your server" }, ...extra];
+      const page = extra.find((p) => p.id && p.id === route());
+      drawSide(page ? page.id : "overview", list);
+      if (page) {
+        main.append(h("h1", { class: "ptitle" }, page.label));
+        pageLife = lifecycle();
+        const out = page.render(main, { server: null, me, life: pageLife, reload: render, param: undefined });
+        if (typeof out === "function") cleanup = out;
+        return;
+      }
       if (!isOwner) return void main.append(h("div", { class: "empty" }, "There's no server here yet. Ask the owner to set it up."));
       return onboarding(main);
     }
