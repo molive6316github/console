@@ -299,6 +299,8 @@ fetch_code() {
   if [ -d "$DIR/.git" ]; then
     chown -R "$SVC_USER:$(id -gn "$SVC_USER")" "$DIR"
     local before after cur
+    # npm can rewrite the lockfile on the server; that's the one local change we always throw away.
+    as_svc git -C "$DIR" checkout -- package-lock.json 2>/dev/null || true
     before=$(as_svc git -C "$DIR" rev-parse --short HEAD)
     cur=$(as_svc git -C "$DIR" rev-parse --abbrev-ref HEAD)
     [ "$cur" = "$BRANCH" ] || warn "$DIR is on branch '$cur' but --branch is '$BRANCH'. Updating '$cur' from '$BRANCH'."
@@ -320,7 +322,7 @@ fetch_code() {
 
 build_app() {
   info "Installing dependencies and building the dashboard..."
-  as_svc npm --prefix "$DIR" install --no-audit --no-fund --loglevel=error
+  as_svc npm --prefix "$DIR" install --no-package-lock --no-audit --no-fund --loglevel=error
   as_svc npm --prefix "$DIR" run build --silent
   ok "Built"
 }
