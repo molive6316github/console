@@ -35,7 +35,7 @@ export function updatesView(box, { me, onInfo }) {
       onInfo?.(info);
       if (!info.supported) return void (status.textContent = info.error);
       if (!info.ok) return void (status.textContent = `Couldn't reach the repo: ${info.error}`);
-      if (info.dirty) return void (status.textContent = "This install has local changes to tracked files. Updating is blocked until they're reverted.");
+      if (info.dirty) return void (status.textContent = `Updating is blocked because these files were changed on this server: ${(info.dirtyFiles ?? []).slice(0, 5).join(", ") || "tracked files"}.`);
       if (info.ahead > 0) return void (status.textContent = "This install has commits that aren't on the remote, so it can't fast-forward.");
       if (info.behind === 0) return void (status.textContent = `Up to date (${info.current}).`);
       status.textContent = `${info.behind} new commit${info.behind === 1 ? "" : "s"}. Installed ${info.current}, latest ${info.latest}.`;

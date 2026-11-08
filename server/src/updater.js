@@ -24,7 +24,7 @@ export function createUpdater({
   if (!BRANCH_RE.test(branch)) throw new Error("Bad update branch name");
 
   const steps = buildSteps ?? [
-    { name: "npm install", cmd: "npm", args: ["install", "--no-audit", "--no-fund"], timeout: 300_000 },
+    { name: "npm install", cmd: "npm", args: ["install", "--no-package-lock", "--no-audit", "--no-fund"], timeout: 300_000 },
     { name: "npm run build", cmd: "npm", args: ["run", "build"], timeout: 180_000 },
   ];
   // Never let git sit waiting for a password prompt nobody can answer.
@@ -92,7 +92,10 @@ export function createUpdater({
     const commits = (await git(["log", "--format=%h %s", "--max-count=20", `HEAD..${target}`])).stdout
       .split("\n")
       .filter(Boolean);
-    const dirty = (await git(["status", "--porcelain", "--untracked-files=no"])).stdout.trim() !== "";
+    // npm rewrites lockfiles on its own; that's never a change worth protecting, so drop it quietly.
+    await git(["checkout", "--", "package-lock.json", "web/package-lock.json"]);
+    const dirtyFiles = (await git(["status", "--porcelain", "--untracked-files=no"])).stdout.split("\n").map((l) => l.slice(3).trim()).filter(Boolean);
+    const dirty = dirtyFiles.length > 0;
     const data = {
       supported: true,
       ok: true,
@@ -106,6 +109,7 @@ export function createUpdater({
       behind,
       ahead,
       dirty,
+      dirtyFiles,
       commits,
     };
     cache = { at: Date.now(), data };
@@ -126,7 +130,7 @@ export function createUpdater({
     try {
       const info = await check({ force: true });
       if (!info.supported || !info.ok) return fail(info.error ?? "Can't check for updates");
-      if (info.dirty) return fail("Tracked files have local changes, so updating would overwrite them. Refusing.");
+      if (info.dirty) return fail(`These files have local changes, so updating would overwrite them: ${info.dirtyFiles.slice(0, 5).join(", ")}. Refusing.`);
       if (info.behind === 0) return { ok: true, updated: false, steps: log, from: info.current, to: info.current };
       if (info.ahead > 0) return fail("This install has commits that aren't on the remote, so it can't fast-forward.");
 
