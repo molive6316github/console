@@ -234,7 +234,7 @@ test("wizard, first install: collects every answer and writes them for Console t
       "maxo", // username
       "n", // make my own password
       "My-long-pass_99", "My-long-pass_99",
-      "", // no domain
+      "y", // change technical settings
       "25570", // port
       tok, // github token
       "MyTeam", // org
@@ -270,7 +270,7 @@ echo "MODE=$MODE_FLAG PORT=$PORT PW_SET=$([ -n "$ADMIN_PW_PRESET" ] && echo y)"
 test("wizard: bad answers are rejected with a warning instead of being saved, and 'no' at the end changes nothing", () => {
   const e = envFile();
   const r = sh(
-    scripted(["2", "root", "y", "", "", "not a token", "n", "Nowhere/Land", "999", "http://insecure", "n", "n", "n"]) + `
+    scripted(["2", "root", "y", "", "not a token", "n", "Nowhere/Land", "999", "http://insecure", "n", "n", "n"]) + `
 HAVE_TTY=1; DIR=/nonexistent-dir
 ( wizard ) && rc=0 || rc=$?; echo "wizard-exit=$rc"
 write_wizard_env
@@ -462,4 +462,86 @@ test("--docker name parsing; a bad name is refused before anything runs", () => 
   assert.equal(sh(`parse_args --docker --yes; echo "$DOCKER_MODE [$DOCKER_NAME]"`).out.trim(), "1 []");
   assert.equal(sh(`parse_args --docker 'Bad Name'`).code, 1);
   assert.equal(sh(`parse_args --docker-remove '../x'`).code, 1);
+});
+
+// ---- friendlier ports, and the domain offer after it's reachable ------------------------------------
+test("docker wizard: no port questions by default; picks free ports and says what they're for", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "console-dw-"));
+  const r = sh(
+    scripted(["minecraft-test", "1", "admin", "y", "n", "y"]) + `
+HAVE_TTY=1; PUBLIC_IP=203.0.113.9
+port_free() { [ "$1" != 3100 ] && [ "$1" != 25565 ]; }   # pretend 3100 and 25565 are taken
+docker() { return 0; }
+docker_wizard
+echo "RESULT PORT=$D_PORT GAME=$D_PORTS PUBLIC=$D_PUBLIC NAME=$DOCKER_NAME"`,
+    { CONSOLE_DOCKER_ENV_DIR: dir }
+  );
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.match(r.out, /RESULT PORT=3101 GAME=25566 PUBLIC=1 NAME=minecraft-test/);
+  assert.match(r.out, /Players join through port 25566/);
+  assert.match(r.err + r.out, /25565 is taken by another server/);
+  assert.doesNotMatch(r.out, /Dashboard port on this machine|Extra ports to publish/, "the scary questions are gone by default");
+});
+
+test("docker wizard: the ports/limits questions only appear if you ask for them", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "console-dw-"));
+  const r = sh(
+    scripted(["box", "2", "admin", "y", "y", "4444", "none", "n", "2g", "1.5", "", "y"]) + `
+HAVE_TTY=1; PUBLIC_IP=203.0.113.9
+port_free() { return 0; }
+docker() { return 0; }
+docker_wizard
+echo "RESULT PORT=$D_PORT GAME=$D_PORTS PUBLIC=$D_PUBLIC MEM=$D_MEM CPUS=$D_CPUS"`,
+    { CONSOLE_DOCKER_ENV_DIR: dir }
+  );
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.match(r.out, /RESULT PORT=4444 GAME=none PUBLIC=0 MEM=2g CPUS=1\.5/);
+  assert.match(r.out, /numbered door/);
+});
+
+test("reachability check: passes straight away, or guides through the cloud firewall and re-checks", () => {
+  const ok = sh(`PUBLIC_IP=1.2.3.4; wait_for() { return 0; }; check_reachable 3000; echo rc=$?`);
+  assert.match(ok.out, /Reachable from the internet at http:\/\/1\.2\.3\.4:3000/);
+  const retry = sh(
+    scripted([""]) + `
+HAVE_TTY=1; PUBLIC_IP=1.2.3.4; IS_OCI=1; N=0
+wait_for() { N=$((N+1)); [ "$N" -ge 2 ]; }
+check_reachable 3000; echo rc=$? calls=$N`
+  );
+  assert.match(retry.err, /Oracle blocks everything/);
+  assert.match(retry.err + retry.out, /Destination port 3000/);
+  assert.match(retry.out, /rc=0 calls=2/);
+  const skip = sh(scripted(["s"]) + `HAVE_TTY=1; PUBLIC_IP=1.2.3.4; wait_for() { return 1; }; check_reachable 3000 && echo rc=0 || echo rc=1`);
+  assert.match(skip.out, /rc=1/);
+  const unattended = sh(`HAVE_TTY=0; PUBLIC_IP=1.2.3.4; wait_for() { return 1; }; check_reachable 3000 && echo rc=0 || echo rc=1`);
+  assert.match(unattended.out, /rc=1/, "never waits for a keypress when nobody is there");
+});
+
+test("docker instance + domain: own Caddy site file, private container, secure cookies, removed with the instance", () => {
+  const fd = fakeDocker();
+  const dir = mkdtempSync(path.join(tmpdir(), "console-dd-"));
+  const caddy = path.join(dir, "caddy");
+  mkdirSync(caddy);
+  const env = { PATH: `${fd.bin}:${process.env.PATH}`, CONSOLE_DOCKER_ENV_DIR: path.join(dir, "env") };
+  const r = sh(
+    `CADDY_DIR='${caddy}'; DOMAIN=mc.example.com; PUBLIC_IP=1.2.3.4
+install_caddy_binary() { :; }; setup_dns() { :; }; reload_or_start_caddy() { echo RELOAD; }; open_ports() { echo OPEN "$@"; }
+caddy() { return 0; }; wait_for() { return 0; }
+d_denv_set app CONSOLE_D_PORT 3105; d_denv_set app CONSOLE_D_PORTS 25565; d_denv_set app CONSOLE_D_PUBLIC 1
+docker_attach_domain app
+echo ---; cat "$CADDY_DIR/console-docker-app.caddy"; echo ---; cat "$CADDY_DIR/Caddyfile"; echo ---; cat "$(d_env_file app)"
+docker_run_args app | tr '\\n' ' '; echo
+DOCKER_REMOVE=app; docker_remove; ls "$CADDY_DIR"`,
+    env
+  );
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.match(r.out, /mc\.example\.com \{[\s\S]*reverse_proxy 127\.0\.0\.1:3105/);
+  assert.match(r.out, /import .*console-docker-\*\.caddy/);
+  assert.match(r.out, /OPEN 80 443/);
+  assert.match(r.out, /CONSOLE_D_PUBLIC=0/);
+  assert.match(r.out, /CONSOLE_SECURE_COOKIES=1/);
+  assert.match(r.out, /CONSOLE_TRUST_PROXY=1/);
+  assert.match(r.out, /-p 127\.0\.0\.1:3105:3000/, "dashboard now only on loopback; Caddy is the front door");
+  assert.match(r.out, /-p 127\.0\.0\.1:25565:25565|-p 0\.0\.0\.0:25565:25565/);
+  assert.ok(!r.out.split("\n").slice(-3).join("\n").includes("console-docker-app.caddy"), "site file removed with the instance");
 });

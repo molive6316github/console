@@ -48,6 +48,8 @@ MODE_FLAG="${CONSOLE_MODE_FLAG:-}"
 ASSUME_YES=0
 RECONFIGURE=0
 DOCKER_MODE=0
+ASK_DOMAIN_LATER=0
+SCRIPTS_DIR=""
 DOCKER_NAME=""
 DOCKER_REMOVE=""
 DOCKER_PURGE=0
@@ -261,7 +263,7 @@ choose_mode() {
   if [ -z "$DOMAIN" ]; then
     DOMAIN=$(env_get CONSOLE_DOMAIN)   # remembered from the last run
   fi
-  if [ -z "$DOMAIN" ] && [ "$HAVE_TTY" -eq 1 ]; then
+  if [ -z "$DOMAIN" ] && [ "$HAVE_TTY" -eq 1 ] && [ "$ASK_DOMAIN_LATER" -eq 0 ]; then
     echo
     echo "  A domain gives you HTTPS (safe logins, a padlock) at an address like console.example.com."
     echo "  No domain yet? Press Enter. You can run this command again later with --domain."
@@ -271,7 +273,7 @@ choose_mode() {
       valid_domain "$DOMAIN" || die "That doesn't look like a valid domain name: $DOMAIN"
     fi
   fi
-  if [ -n "$DOMAIN" ] && [ -z "$CF_TOKEN" ] && [ "$HAVE_TTY" -eq 1 ] && ! dns_points_to "$DOMAIN" "${PUBLIC_IP:-none}"; then
+  if [ -n "$DOMAIN" ] && [ -z "$CF_TOKEN" ] && [ "$HAVE_TTY" -eq 1 ] && [ "$ASK_DOMAIN_LATER" -eq 0 ] && ! dns_points_to "$DOMAIN" "${PUBLIC_IP:-none}"; then
     echo
     echo "  I can create the DNS record for you if the domain is on Cloudflare."
     echo "  Make a token at https://dash.cloudflare.com/profile/api-tokens using the 'Edit zone DNS'"
@@ -343,8 +345,9 @@ wizard() {
       if yes_no "Make up a strong password for me?" y; then
         ok "I'll generate one and show it once at the end."
       else
-        local p1 p2
+        local p1 p2 tries=0
         while :; do
+          tries=$((tries + 1)); [ "$tries" -le 6 ] || die "No usable password after 6 tries. Run the installer again."
           p1=$(ask_secret "    Password (10+ characters; letters, numbers, _ . @ % + , : = -): ")
           if ! valid_password "$p1"; then warn "Too short, or it has a character I can't pass safely. Try again."; continue; fi
           p2=$(ask_secret "    Type it again: ")
@@ -357,11 +360,17 @@ wizard() {
     fi
   fi
 
-  step "Where will you open it?"
+  step "How will you reach it?"
+  ASK_DOMAIN_LATER=1
   choose_mode
-  if [ -z "$PORT_FLAG" ] && [ -z "$(env_get PORT)" ] && [ -z "$DOMAIN" ]; then
-    local pt; pt=$(ask_default "Port" "3000")
-    if [[ $pt =~ ^[0-9]+$ ]] && [ "$pt" -ge 1 ] && [ "$pt" -le 65535 ]; then PORT=$pt; else warn "That isn't a valid port. Using 3000."; fi
+  if [ -z "$DOMAIN" ]; then
+    hint "First it will answer at http://${PUBLIC_IP:-<your-ip>}:$PORT. Once that works from the internet,"
+    hint "I'll offer to put your own domain on it with HTTPS. No need to decide now."
+  fi
+  if yes_no "Change technical settings (the port number)?" n; then
+    hint "A port is just a numbered door on this machine. $PORT is fine unless something else already uses it."
+    local pt; pt=$(ask_default "Port" "$PORT")
+    if [[ $pt =~ ^[0-9]+$ ]] && [ "$pt" -ge 1 ] && [ "$pt" -le 65535 ]; then PORT=$pt; else warn "That isn't a valid port. Keeping $PORT."; fi
   fi
 
   if [ "$first" -eq 1 ]; then
@@ -721,7 +730,7 @@ setup_dns() {
   if [ -z "$PUBLIC_IP" ]; then warn "Couldn't work out this server's public IP, so I can't create the DNS record."; return; fi
   if [ -n "$CF_TOKEN" ]; then
     local out
-    if out=$(CF_API_TOKEN="$CF_TOKEN" node "$DIR/scripts/cf-dns.mjs" "$DOMAIN" "$PUBLIC_IP" 2>&1); then
+    if out=$(CF_API_TOKEN="$CF_TOKEN" node "${SCRIPTS_DIR:-$DIR/scripts}/cf-dns.mjs" "$DOMAIN" "$PUBLIC_IP" 2>&1); then
       ok "Cloudflare: $out"
       info "Waiting for DNS to show up (up to 90 seconds)..."
       local i=0
@@ -827,7 +836,9 @@ docker_wizard() {
   [ -z "$existing" ] || hint "Existing Docker instances: $existing"
   step "Name this instance"
   hint "Lowercase letters, numbers, - and _. Re-use a name to update that instance (its data is kept)."
+  local ntries=0
   while :; do
+    ntries=$((ntries + 1)); [ "$ntries" -le 6 ] || die "No usable name after 6 tries."
     name=$(ask_default "Name" "${name:-sandbox}")
     valid_instance "$name" && break
     warn "Use a-z, 0-9, - and _ only."; name=""
@@ -845,12 +856,15 @@ docker_wizard() {
     ans=$(ask_default "Pick one" 2)
     case "$ans" in 1|m|M) MODE_FLAG=minecraft ;; *) MODE_FLAG=standard ;; esac
   fi
-  D_PORT=$(ask_default "Dashboard port on this machine" "$(next_free_port 3100)")
-  { [[ $D_PORT =~ ^[0-9]+$ ]] && [ "$D_PORT" -ge 1 ] && [ "$D_PORT" -le 65535 ]; } || { warn "Not a valid port. Using $(next_free_port 3100)."; D_PORT=$(next_free_port 3100); }
-  hint "Ports your servers inside it need reachable from outside (comma-separated, or 'none')."
-  D_PORTS=$(ask_default "Extra ports to publish" "$([ "$MODE_FLAG" = minecraft ] && echo 25565 || echo none)")
-  valid_ports "$D_PORTS" || { warn "That isn't a list of ports. Publishing none."; D_PORTS=none; }
-  if yes_no "Reachable from the internet? (No = only from this machine, e.g. through an SSH tunnel)" y; then D_PUBLIC=1; else D_PUBLIC=0; fi
+  # Sensible defaults first. Nothing here needs a decision.
+  D_PORT=$(next_free_port 3100)
+  if [ "$MODE_FLAG" = minecraft ]; then D_PORTS=$(next_free_port 25565); else D_PORTS=none; fi
+  D_PUBLIC=1
+  ok "Dashboard: I'll use port $D_PORT (a free one)."
+  if [ "$D_PORTS" != none ]; then
+    ok "Players join through port $D_PORTS$([ "$D_PORTS" = 25565 ] && echo ', the standard Minecraft one'). I'll open it."
+    [ "$D_PORTS" = 25565 ] || hint "25565 is taken by another server here, so this one gets $D_PORTS. Players type ${PUBLIC_IP:-<ip>}:$D_PORTS."
+  fi
 
   step "Its own admin account"
   WIZ_ADMIN_USER=$(ask_default "Username" "admin")
@@ -858,8 +872,9 @@ docker_wizard() {
   if [ -z "$ADMIN_PW_PRESET" ]; then
     if yes_no "Make up a strong password for me?" y; then ok "I'll generate one and show it once at the end."
     else
-      local p1 p2
+      local p1 p2 tries=0
       while :; do
+        tries=$((tries + 1)); [ "$tries" -le 6 ] || die "No usable password after 6 tries. Run the installer again."
         p1=$(ask_secret "    Password (10+ characters; letters, numbers, _ . @ % + , : = -): ")
         valid_password "$p1" || { warn "Too short, or it has a character I can't pass safely."; continue; }
         p2=$(ask_secret "    Type it again: ")
@@ -869,19 +884,29 @@ docker_wizard() {
     fi
   fi
 
-  step "Limits and extras (all optional)"
-  hint "Limits stop a runaway server in here from starving the rest of the machine."
-  D_MEM=$(ask "    Memory limit, like 4g (Enter = none): ")
-  if [ -n "$D_MEM" ] && ! valid_limit "$D_MEM"; then warn "Use a number with m or g, like 512m or 4g. No limit set."; D_MEM=""; fi
-  D_CPUS=$(ask "    CPU limit, like 2 (Enter = none): ")
-  if [ -n "$D_CPUS" ] && ! valid_limit "$D_CPUS"; then warn "Use a number like 1.5. No limit set."; D_CPUS=""; fi
-  local t; t=$(ask_secret "    GitHub token for this instance (Enter to skip): ")
-  if [ -n "$t" ]; then if valid_token "$t"; then WIZ_GH_TOKEN=$t; ok "Token saved ($(mask_tail "$t"))"; else warn "That doesn't look like a GitHub token. Skipping."; fi; fi
+  step "Anything to change? (optional)"
+  if yes_no "Adjust ports, limits or add a GitHub token?" n; then
+    hint "A port is a numbered door on this machine. Other computers reach the dashboard (and your game) through these."
+    local pt; pt=$(ask_default "Dashboard port" "$D_PORT")
+    if [[ $pt =~ ^[0-9]+$ ]] && [ "$pt" -ge 1 ] && [ "$pt" -le 65535 ]; then D_PORT=$pt; else warn "Not a valid port. Keeping $D_PORT."; fi
+    hint "Game/app ports to open for players, comma-separated, or 'none'."
+    local gp; gp=$(ask_default "Game ports" "$D_PORTS")
+    if valid_ports "$gp"; then D_PORTS=$gp; else warn "That isn't a list of ports. Keeping $D_PORTS."; fi
+    yes_no "Let anyone on the internet open the dashboard? (No = only you, through a private tunnel)" y || D_PUBLIC=0
+    hint "Limits stop a runaway server in here from starving the rest of the machine."
+    D_MEM=$(ask "    Memory limit, like 4g (Enter = none): ")
+    if [ -n "$D_MEM" ] && ! valid_limit "$D_MEM"; then warn "Use a number with m or g, like 512m or 4g. No limit set."; D_MEM=""; fi
+    D_CPUS=$(ask "    CPU limit, like 2 (Enter = none): ")
+    if [ -n "$D_CPUS" ] && ! valid_limit "$D_CPUS"; then warn "Use a number like 1.5. No limit set."; D_CPUS=""; fi
+    local t; t=$(ask_secret "    GitHub token for this instance (Enter to skip): ")
+    if [ -n "$t" ]; then if valid_token "$t"; then WIZ_GH_TOKEN=$t; ok "Token saved ($(mask_tail "$t"))"; else warn "That doesn't look like a GitHub token. Skipping."; fi; fi
+  fi
+  hint "After it's running I'll check it from the internet, then offer to put your own domain on it."
 
   printf '\n%sReady%s\n' "$B" "$N"
   echo "    Instance:  console-$name  (data in the Docker volume console-$name-data)"
   echo "    Dashboard: http://${PUBLIC_IP:-<this-machine>}:$D_PORT$([ "$D_PUBLIC" = 0 ] && echo '  (this machine only)')"
-  echo "    Ports:     $D_PORTS"
+  echo "    Ports:     $D_PORTS (opened for players)"
   echo "    Limits:    ${D_MEM:-no memory limit}, ${D_CPUS:+$D_CPUS cpu(s)}${D_CPUS:-no cpu limit}"
   echo
   yes_no "Go?" y || die "Cancelled. Nothing was changed."
@@ -967,6 +992,11 @@ docker_main() {
     wait_for "http://127.0.0.1:$port/api/me" 60 || { docker logs --tail 25 "console-$n" >&2 || true; die "The container didn't come back after the first start."; }
   fi
   [ "$(d_denv_get "$n" CONSOLE_D_PUBLIC)" = 0 ] || open_ports "$port" $(d_denv_get "$n" CONSOLE_D_PORTS | tr ',' ' ' | sed 's/none//')
+  if [ "$HAVE_TTY" -eq 1 ] && [ "$(d_denv_get "$n" CONSOLE_D_PUBLIC)" != 0 ] && [ -z "$(d_denv_get "$n" CONSOLE_DOMAIN)" ]; then
+    if check_reachable "$port" && yes_no "Put your own domain on it with HTTPS?" n && ask_domain_and_dns; then
+      docker_attach_domain "$n"
+    fi
+  fi
   docker_summary "$n" "$fresh"
 }
 
@@ -974,18 +1004,19 @@ docker_summary() { # name fresh
   local n=$1 fresh=$2 port ports pub host
   port=$(d_denv_get "$n" CONSOLE_D_PORT); ports=$(d_denv_get "$n" CONSOLE_D_PORTS); pub=$(d_denv_get "$n" CONSOLE_D_PUBLIC)
   host=${PUBLIC_IP:-<this-machine>}; [ "$pub" = 0 ] && host=127.0.0.1
+  local dom; dom=$(d_denv_get "$n" CONSOLE_DOMAIN)
   echo
   echo "${B}================================================================${N}"
   echo "${B}  Docker instance '$n' is running${N}"
   echo
-  echo "  Open it:   http://$host:$port"
+  if [ -n "$dom" ]; then echo "  Open it:   https://$dom"; else echo "  Open it:   http://$host:$port"; fi
   if [ "$fresh" -eq 1 ]; then
     echo "  Sign in:   $(d_denv_get "$n" CONSOLE_ADMIN_USER)  /  $([ "$ADMIN_PW_NOTE" = generated ] && echo "$ADMIN_PW" || echo 'the password you set')"
     [ "$ADMIN_PW_NOTE" != generated ] || echo "             ^ shown once, save it now."
   else
     echo "  Sign in:   with the account you made earlier (nothing was reset)"
   fi
-  [ "$pub" = 0 ] && echo "  It only listens on this machine. From your computer: ssh -L $port:127.0.0.1:$port <this-server>"
+  [ "$pub" != 0 ] || [ -n "$dom" ] || echo "  It only listens on this machine. From your computer: ssh -L $port:127.0.0.1:$port <this-server>"
   if [ "$pub" != 0 ]; then
     echo
     if [ "$IS_OCI" -eq 1 ]; then
@@ -1015,6 +1046,10 @@ docker_remove() {
   fi
   docker rm -f "console-$n" >/dev/null 2>&1 || true
   rm -f "$(d_env_file "$n")"
+  if [ -f "$CADDY_DIR/console-docker-$n.caddy" ]; then
+    rm -f "$CADDY_DIR/console-docker-$n.caddy"
+    if systemctl is-active --quiet caddy 2>/dev/null; then systemctl reload caddy >/dev/null 2>&1 || true; fi
+  fi
   ok "Removed the container console-$n"
   if [ "$DOCKER_PURGE" -eq 1 ]; then docker volume rm "console-$n-data" >/dev/null 2>&1 && ok "Deleted its data volume"
   else info "Its data is kept in the volume console-$n-data (add --purge to delete that too)."; fi
@@ -1034,6 +1069,97 @@ pick_target() {
     2) DOCKER_MODE=1 ;;
     3) if [ -n "$inst" ]; then DOCKER_REMOVE=$(ask "    Which one? "); valid_instance "$DOCKER_REMOVE" || die "Not a valid instance name."; fi ;;
   esac
+}
+
+
+# ---- after it works: check it from the internet, then offer a custom domain ---------------------
+
+# Tries to open the dashboard the way the outside world would. If a cloud firewall is in the way, says exactly what to add.
+check_reachable() { # port label
+  local port=$1 url tries=0
+  [ -n "$PUBLIC_IP" ] || return 0
+  url="http://$PUBLIC_IP:$port/api/me"
+  say "Checking it from the internet"
+  while :; do
+    if wait_for "$url" 8; then ok "Reachable from the internet at http://$PUBLIC_IP:$port"; return 0; fi
+    tries=$((tries + 1))
+    if [ "$IS_OCI" -eq 1 ]; then
+      warn "Not reachable yet. Oracle blocks everything until you allow it:"
+      info "Oracle Cloud console > Networking > Virtual Cloud Networks > your VCN > Security Lists > Add Ingress Rules"
+      info "Source CIDR 0.0.0.0/0   Protocol TCP   Destination port $port"
+    else
+      warn "Not reachable yet. Open TCP $port in your cloud provider's firewall / security group."
+    fi
+    [ "$HAVE_TTY" -eq 1 ] || return 1
+    local a; a=$(ask "    Press Enter once you've added it to check again, or type s to skip: ")
+    case "$a" in s|S|skip) return 1 ;; esac
+    [ "$tries" -lt 10 ] || return 1
+  done
+}
+
+ask_domain_and_dns() { # sets DOMAIN and CF_TOKEN; returns 1 when the person skips
+  local d
+  echo
+  echo "  A domain gives you HTTPS (a padlock, safe logins) at an address like mc.example.com."
+  d=$(ask "  Your domain, e.g. mc.example.com (Enter to skip for now): ")
+  [ -n "$d" ] || return 1
+  d=$(normalize_domain "$d")
+  valid_domain "$d" || { warn "That doesn't look like a valid domain name."; return 1; }
+  DOMAIN=$d
+  if [ -z "$CF_TOKEN" ] && ! dns_points_to "$DOMAIN" "${PUBLIC_IP:-none}"; then
+    echo
+    echo "  I can create the DNS record for you if the domain is on Cloudflare."
+    echo "  Make a token at https://dash.cloudflare.com/profile/api-tokens using the 'Edit zone DNS'"
+    echo "  template, limited to your domain's zone, and paste it here. (Enter to skip and add the record"
+    echo "  yourself. The token is used once and never saved.)"
+    CF_TOKEN=$(ask_secret "  Cloudflare API token: ")
+  fi
+  return 0
+}
+
+# Main install: it's up on http://IP:PORT; now move it behind Caddy with HTTPS.
+offer_domain() {
+  [ "$HAVE_TTY" -eq 1 ] && [ -z "$DOMAIN" ] && [ "$IP_ONLY" -eq 0 ] || return 0
+  yes_no "Put your own domain on it with HTTPS?" n || return 0
+  ask_domain_and_dns || return 0
+  say "Switching to https://$DOMAIN"
+  install_caddy_binary
+  write_env
+  install_service
+  setup_domain
+}
+
+# Docker instance: reverse-proxy its port through the host's Caddy under its own site file.
+docker_attach_domain() { # name
+  local n=$1 port site
+  port=$(d_denv_get "$n" CONSOLE_D_PORT)
+  site="$CADDY_DIR/console-docker-$n.caddy"
+  SCRIPTS_DIR="$DOCKER_SRC/scripts"
+  say "Domain: $DOMAIN"
+  install_caddy_binary
+  setup_dns
+  mkdir -p "$CADDY_DIR"
+  render_caddyfile "$DOMAIN" "$port" > "$site"
+  local main="$CADDY_DIR/Caddyfile" line="import $CADDY_DIR/console-docker-*.caddy"
+  [ -f "$main" ] || : > "$main"
+  grep -qxF "$line" "$main" || printf '\n%s\n' "$line" >> "$main"
+  if ! caddy validate --config "$main" --adapter caddyfile >/dev/null 2>&1; then
+    caddy validate --config "$main" --adapter caddyfile >&2 || true
+    rm -f "$site"
+    die "Caddy didn't accept the generated config (shown above). Nothing was switched."
+  fi
+  reload_or_start_caddy
+  open_ports 80 443
+  # Only Caddy should face the internet now; cookies become HTTPS-only.
+  d_denv_set "$n" CONSOLE_D_PUBLIC 0
+  d_denv_set "$n" CONSOLE_SECURE_COOKIES 1
+  d_denv_set "$n" CONSOLE_TRUST_PROXY 1
+  d_denv_set "$n" CONSOLE_DOMAIN "$DOMAIN"
+  docker_start_instance "$n"
+  wait_for "http://127.0.0.1:$port/api/me" 60 || die "The container didn't come back."
+  info "Getting an HTTPS certificate (up to 90 seconds)..."
+  if wait_for "https://$DOMAIN/api/me" 90; then CERT_OK=1; ok "HTTPS works: https://$DOMAIN"
+  else warn "HTTPS isn't answering yet. Usually DNS hasn't spread, or ports 80/443 aren't open in your cloud firewall. Watch: journalctl -u caddy -f"; fi
 }
 
 # ---- final report ----------------------------------------------------------------------
@@ -1151,6 +1277,10 @@ main() {
     open_ports "$PORT"
   fi
   if is_mc_mode; then say "Minecraft"; open_ports 25565; fi
+
+  if [ -z "$DOMAIN" ] && [ "$HAVE_TTY" -eq 1 ] && [ "$IP_ONLY" -eq 0 ]; then
+    if check_reachable "$PORT"; then offer_domain; fi
+  fi
 
   print_summary
 }
