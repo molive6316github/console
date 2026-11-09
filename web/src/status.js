@@ -1,7 +1,9 @@
 import "./style.css";
 import "./panel/panel.css";
+import "./panel/blocks.css";
 import { h } from "./ui.js";
 
+try { if (localStorage.getItem("blocks") !== "0") document.body.classList.add("mc"); } catch { document.body.classList.add("mc"); }
 const app = document.getElementById("app");
 
 async function draw() {

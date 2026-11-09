@@ -1,4 +1,5 @@
 import "./panel.css";
+import "./blocks.css";
 import { h, api, toast, field, lifecycle } from "../ui.js";
 import { consoleTab, filesTab, activityTab } from "../views/server.js";
 import { playersTab, gameTab, pluginsTab, worldsTab } from "../views/minecraft.js";
@@ -16,6 +17,17 @@ import { autofixPage } from "./autofix.js";
 import { assistantPage } from "./assistant.js";
 import { watchJoinFailures } from "./connfail.js";
 
+// Block theme on by default; the choice is remembered per browser.
+export function setBlocks(on) {
+  document.body.classList.toggle("mc", on);
+  try { localStorage.setItem("blocks", on ? "1" : "0"); } catch { /* private window */ }
+}
+export function applyBlocks() {
+  let on = true;
+  try { on = localStorage.getItem("blocks") !== "0"; } catch { /* default on */ }
+  document.body.classList.toggle("mc", on);
+}
+
 // The Minecraft-mode app: one server, a sidebar, nothing generic.
 export function startPanel(app, me, { signOut }) {
   const has = (p) => me.role === "admin" || (me.perms ?? []).includes(p);
@@ -31,9 +43,9 @@ export function startPanel(app, me, { signOut }) {
   let menuBtn;
   const shell = h("div", { class: "panelapp" },
     h("aside", { class: "sidebar", id: "sidebar" },
-      h("div", { class: "logo" }, "⛏️ ", h("span", {}, "Console")),
+      h("div", { class: "logo" }, h("div", { class: "cubewrap", "aria-hidden": "true" }, h("div", { class: "cube" }, ...[1, 2, 3, 4, 5, 6].map(() => h("i")))), h("span", {}, "Console")),
       side,
-      h("div", { class: "who" }, h("span", {}, `${me.username}${isOwner ? " · owner" : ""}`), h("button", { onclick: signOut }, "Sign out"))),
+      h("div", { class: "who" }, h("span", {}, `${me.username}${isOwner ? " · owner" : ""}`), h("button", { class: "blocktoggle", title: "Switch the block theme on or off", onclick: () => setBlocks(!document.body.classList.contains("mc")) }, "Blocks"), h("button", { onclick: signOut }, "Sign out"))),
     h("div", { class: "pbody" },
       h("div", { class: "topbar" }, (menuBtn = h("button", { class: "burger", "aria-label": "Menu", onclick: () => shell.classList.toggle("open") }, "☰")), head, badge),
       main)

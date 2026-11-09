@@ -217,6 +217,10 @@ The GitHub token needs write access to *Contents* on the backup repo. Open TCP 2
 - **Go live checklist**: checks the server (EULA, whitelist, ops, rollback plugin, backups, off-box copy, crash restart, daily restart, memory, alerts) and fixes most of it in one click. **Off-box backups** copy each world backup to any S3-compatible storage (Oracle, Backblaze B2, Cloudflare R2, AWS).
 - **Claude Code** (Panel settings, off by default): installs Claude Code into `~/.console-tools` (no sudo) and opens it in the web terminal so you can sign in with your own account. It needs the web terminal enabled. Claude Code can run commands as Console's user, so it is admin-only, disabled by safe mode, and audited.
 
+## Block theme
+
+The panel is drawn like Minecraft: dirt sidebar with a grass lip, plank top bar, stone slabs, bevelled buttons and a spinning grass block. Textures are original 16x16 tiles made by `scripts/gen-textures.mjs` (no game assets). The **Blocks** button in the sidebar turns it off (remembered per browser).
+
 ## Worlds & maps (Minecraft mode)
 
 **Worlds & maps** in the sidebar:

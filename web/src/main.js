@@ -12,7 +12,8 @@ import { updatesView } from "./views/updates.js";
 import { discoverView, newServerView } from "./views/discover.js";
 import { createView } from "./views/create.js";
 import { linuxView } from "./views/linux.js";
-import { startPanel } from "./panel/panel.js";
+import { startPanel, applyBlocks } from "./panel/panel.js";
+applyBlocks();
 import { invitePage } from "./panel/invite.js";
 import { LEVELS, atLeast, getLevel, setLevel, defaultLevel } from "./level.js";
 
