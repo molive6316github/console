@@ -1,3 +1,4 @@
+import { fixItButton } from "./autofix.js";
 import { h, api, toast, field } from "../ui.js";
 
 const base = (s) => `/servers/${encodeURIComponent(s.id)}/mc`;
@@ -68,7 +69,8 @@ function diagBox(box, server) {
       const d = await api(`${base(server)}/diagnose`);
       out.replaceChildren(
         ...d.checks.map((c) => { const [sym, cls] = ICON[c.state] ?? ICON.info; return h("div", { class: "row tight golive-row" }, h("span", { class: `gl-ico ${cls}` }, sym), h("div", { class: "grow" }, h("b", {}, c.label), h("div", { class: "muted small" }, c.detail))); }),
-        d.log ? h("pre", { class: "snippet" }, d.log) : null
+        d.log ? h("pre", { class: "snippet" }, d.log) : null,
+        d.verdict !== "ok" ? fixItButton("minecraft", server.id, "The user pressed Fix it on the Diagnose card.", run) : null
       );
     } catch (e) { out.replaceChildren(h("div", { class: "error" }, e.message)); }
   };

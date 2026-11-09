@@ -95,14 +95,7 @@ export function createUpdater({
     // npm rewrites lockfiles on its own; that's never a change worth protecting, so drop it quietly.
     await git(["checkout", "--", "package-lock.json", "web/package-lock.json"]);
     const listDirty = async () => (await git(["status", "--porcelain", "--untracked-files=no"])).stdout.split("\n").map((l) => l.slice(3).trim()).filter(Boolean);
-    let dirtyFiles = await listDirty();
-    if (dirtyFiles.length) {
-      // Nobody should be hand-editing a managed install. Park the changes in a git stash (recoverable) instead of blocking updates.
-      await git(["stash", "push", "-m", `console-auto-${Date.now()}`]).catch(() => {});
-      dirtyFiles = await listDirty();
-      if (dirtyFiles.length) await git(["checkout", "--", "."]).catch(() => {});
-      dirtyFiles = await listDirty();
-    }
+    const dirtyFiles = await listDirty();
     const dirty = dirtyFiles.length > 0;
     const data = {
       supported: true,
@@ -138,8 +131,13 @@ export function createUpdater({
     try {
       const info = await check({ force: true });
       if (!info.supported || !info.ok) return fail(info.error ?? "Can't check for updates");
-      if (info.dirty) return fail(`These files have local changes, so updating would overwrite them: ${info.dirtyFiles.slice(0, 5).join(", ")}. Refusing.`);
       if (info.behind === 0) return { ok: true, updated: false, steps: log, from: info.current, to: info.current };
+      if (info.dirty) {
+        // Nobody should hand-edit a managed install. Park the changes in a git stash (recoverable) instead of blocking the update.
+        record("park local changes (git stash)", await git(["stash", "push", "-m", `console-auto-${Date.now()}`]));
+        if ((await git(["status", "--porcelain", "--untracked-files=no"])).stdout.trim()) await git(["checkout", "--", "."]);
+        if ((await git(["status", "--porcelain", "--untracked-files=no"])).stdout.trim()) return fail(`Couldn't clear local changes to ${info.dirtyFiles.slice(0, 5).join(", ")}.`);
+      }
       if (info.ahead > 0) return fail("This install has commits that aren't on the remote, so it can't fast-forward.");
 
       const oldHead = (await git(["rev-parse", "HEAD"])).stdout.trim();

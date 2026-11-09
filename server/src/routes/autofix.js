@@ -2,7 +2,7 @@ import { audit } from "../db.js";
 import { AutoFixError } from "../autofix.js";
 
 // Admin-only. Settings, history, a "fix it now" button, and undo.
-export function autofixRoutes(app, { db, need, autofix, safeMode }) {
+export function autofixRoutes(app, { db, need, autofix, connWatcher, safeMode }) {
   const gate = async (req, reply) => safeMode && reply.code(403).send({ error: "Safe mode is on: this is disabled" });
   const pre = [need("admin"), gate];
   const wrap = (fn) => async (req, reply) => {
@@ -23,6 +23,9 @@ export function autofixRoutes(app, { db, need, autofix, safeMode }) {
     const r = await autofix.fix({ scope: sc, title: `${scope}${target ? ` ${target}` : ""}`, actor: "manual", incident: null });
     return r;
   }));
+  // Join failures caused by the server itself, for the panel's popup.
+  app.get("/api/connfail", { preHandler: need("admin") }, async (req) => ({ alerts: connWatcher.list(Number(req.query?.since) || 0), autofix: (await autofix.status()).enabled }));
+  app.post("/api/connfail/dismiss", { preHandler: need("admin") }, async (req) => { connWatcher.dismiss(Number(req.body?.id)); return { ok: true }; });
   app.post("/api/autofix/:id/undo", { preHandler: pre }, wrap(async (req) => {
     await autofix.undo(req.params.id);
     audit(db, { username: req.user.username, action: "autofix_undo", ok: true, detail: req.params.id });

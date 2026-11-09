@@ -26,6 +26,10 @@ import { createClaudeCode } from "./claudecode.js";
 import { siteRoutes } from "./routes/sites.js";
 import { nsRoutes } from "./routes/ns.js";
 import { createPluginHost, pluginRoutes } from "./cplugins.js";
+import { createAutoFix } from "./autofix.js";
+import { createScopes } from "./autofix-scopes.js";
+import { createConnWatcher } from "./mc/connfail.js";
+import { autofixRoutes } from "./routes/autofix.js";
 import { createPluginBuilder } from "./pluginbuilder.js";
 import { createNsConfig, createAuthority, createNameserverServer } from "./nameserver.js";
 import { createSites } from "./sites.js";
@@ -66,6 +70,7 @@ export function buildApp({
   siteOptions = null,
   nsOptions = null,
   pluginOptions = null,
+  autofixOptions = null,
   claudeOptions = null,
   logRing = createLogRing(),
   autoUpdateEveryMs = 0, // index.js turns this on; tests leave it off
@@ -323,6 +328,27 @@ export function buildApp({
   pluginRoutes(app, { ...ctx, host: pluginHost, builder });
   if (pluginOptions?.boot !== false) app.addHook("onReady", async () => { await pluginHost.boot(); });
   app.addHook("onClose", async () => { pluginHost.shutdown(); });
+  // Auto-fix: a swappable agent repairs Minecraft, Console, plugins and Link; every run is snapshotted, verified and reverted if it doesn't work.
+  const autofixScopes = createScopes({ db, mc: services.mc, runtime: services.runtime, diagnose: services.diagnose, pluginHost, repoRoot: path.resolve(here, "../.."), run: runCmd, restartConsole: async () => { setTimeout(() => process.exit(75), 1500); }, ...(autofixOptions?.scopes ?? {}) });
+  const autofix = createAutoFix({ db, dataDir, jobs: services.jobs, run: runCmd, scopes: autofixScopes, ...(autofixOptions?.engine ?? {}) });
+  const connWatcher = createConnWatcher({ db, ...(autofixOptions?.connWatcher ?? {}) });
+  autofixRoutes(app, { ...ctx, autofix, connWatcher, safeMode });
+  app.decorate("connWatcher", connWatcher);
+  if (pluginOptions?.boot !== false) {
+    app.addHook("onReady", async () => {
+      const t = setInterval(() => connWatcher.tick().catch(() => {}), 8000);
+      t.unref?.();
+      app.addHook("onClose", async () => clearInterval(t));
+    });
+  }
+  app.decorate("autofix", autofix);
+  services.hooks.crash = (server, r) => {
+    if (!server || (r?.restarted && (r.attempt ?? 1) < 2)) return; // one automatic restart first; only a repeat crash is worth an agent
+    autofixScopes.minecraft(server.id, "The server keeps crashing after Console restarted it.")
+      .then((sc) => autofix.fix({ scope: sc, title: `minecraft ${server.name}`, actor: "auto", incident: `crash:${server.id}` }))
+      .then(() => services.notifier.send(`🛠️ ${server.name} keeps crashing. Auto-fix is trying to repair it.`))
+      .catch(() => {});
+  };
   siteRoutes(app, { ...ctx, sites });
   const claude = createClaudeCode({ db, jobs: services.jobs, run: runCmd, ...(claudeOptions ?? {}) });
   claudeCodeRoutes(app, { ...ctx, claude });

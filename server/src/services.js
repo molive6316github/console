@@ -35,7 +35,8 @@ export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverO
   });
   const notifier = createNotifier({ db, fetchImpl });
   let startupRef = null;
-  const monitor = createMonitor({ db, notifier, getStatus: (s) => runtime.status(s), now, sampler, onCrash: (s) => startupRef?.onCrash(s, runtime.perform) });
+  const hooks = { crash: null };
+  const monitor = createMonitor({ db, notifier, getStatus: (s) => runtime.status(s), now, sampler, onCrash: async (s) => { const r = await startupRef?.onCrash(s, runtime.perform); hooks.crash?.(s, r); return r; } });
   let mcRef = null;
   const scheduler = createScheduler({ db, runtime, now, runMc: (...a) => mcRef.scheduled(...a) });
   const jobs = createJobs();
@@ -99,6 +100,7 @@ export function createServices({ db, dataDir, fetchImpl, now, sampler, discoverO
     for (const sv of listServers(db)) if (sv.type === "tmux" && mcRoot(sv)) stats.sample(sv).catch(() => {});
   };
   return {
+    hooks,
     runtime,
     discover,
     notifier,

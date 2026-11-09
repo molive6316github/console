@@ -11,11 +11,14 @@ import { overviewPage, startupPage, versionPage, peoplePage, joinPage } from "./
 import { websitePage } from "./website.js";
 import { goLivePage } from "./golive.js";
 import { consolePluginsPage } from "./cplugins.js";
+import { autofixPage } from "./autofix.js";
+import { watchJoinFailures } from "./connfail.js";
 
 // The Minecraft-mode app: one server, a sidebar, nothing generic.
 export function startPanel(app, me, { signOut }) {
   const has = (p) => me.role === "admin" || (me.perms ?? []).includes(p);
   const isOwner = me.role === "admin";
+  if (isOwner && !window.__joinWatch) window.__joinWatch = watchJoinFailures();
   let server = null;
   let pageLife = null;
   let cleanup = null;
@@ -55,6 +58,7 @@ export function startPanel(app, me, { signOut }) {
       { id: "website", icon: "◫", label: "Website", show: isOwner, render: websitePage },
       { id: "activity", icon: "≡", label: "Activity", show: has("activity"), render: (box, o) => activityTab(box, o) },
       { sep: "Panel", show: true },
+      { id: "autofix", icon: "🛠", label: "Auto-fix", show: isOwner, render: autofixPage },
       { id: "cplugins", icon: "⧉", label: "Console plugins", show: isOwner, render: consolePluginsPage },
       { id: "machine", icon: "▥", label: "Machine & logs", show: isOwner, render: machinePage },
       { id: "panel-settings", icon: "☰", label: "Panel settings", show: isOwner, render: (box, o) => settingsView(box, o) },
@@ -65,7 +69,7 @@ export function startPanel(app, me, { signOut }) {
 
   const route = () => location.hash.replace(/^#\/?/, "").split("/")[0] || "overview";
 
-  const NO_SERVER_PAGES = ["cplugins", "machine", "panel-settings", "updates", "account"];
+  const NO_SERVER_PAGES = ["autofix", "cplugins", "machine", "panel-settings", "updates", "account"];
   function drawSide(current, list = PAGES()) {
     side.replaceChildren(...list.map((p) => (p.sep ? h("div", { class: "sep" }, p.sep) : h("a", { href: `#/${p.id}`, class: p.id === current ? "on" : "" }, h("span", { class: "ico" }, p.icon), p.label))));
   }
