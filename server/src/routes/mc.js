@@ -86,6 +86,51 @@ export function mcRoutes(app, { db, need, allow, mc, safeMode }) {
     }
   }));
 
+
+  // ---- worlds & maps ----
+  const mapsAudit = (req, action, detail) => auditIt(req, action, detail);
+  app.get("/api/servers/:id/mc/worlds", { preHandler: asBackups }, wrap(async (req) => mc.maps.list(req.srv)));
+  // Raw zip body. The custom x-console-upload header can't be sent by another website without a CORS preflight, so this is safe from cross-site posts.
+  app.post("/api/servers/:id/mc/worlds/upload", { preHandler: [...editBackups, async (req, reply) => {
+    if (req.headers["x-console-upload"] !== "1") return reply.code(400).send({ error: "Bad upload request" });
+  }] }, wrap(async (req) => {
+    const r = await mc.maps.upload(req.srv, req.body, String(req.query?.name ?? ""));
+    mapsAudit(req, "world_upload", r.name);
+    return r;
+  }));
+  app.get("/api/servers/:id/mc/worlds/:world/download", { preHandler: editBackups }, wrap(async (req, reply) => {
+    const { stream, filename } = await mc.maps.download(req.srv, req.params.world);
+    mapsAudit(req, "world_download", req.params.world);
+    reply.header("content-disposition", `attachment; filename="${filename}"`).type("application/zip");
+    return reply.send(stream);
+  }));
+  app.post("/api/servers/:id/mc/worlds/import-url", { preHandler: editBackups }, wrap(async (req) => {
+    const job = mc.maps.importUrl(req.srv, String(req.body?.url ?? ""), String(req.body?.name ?? ""), req.user.username);
+    mapsAudit(req, "world_import_url", `${req.body?.name} from ${req.body?.url}`);
+    return { jobId: job.id };
+  }));
+  app.post("/api/servers/:id/mc/worlds/archive", { preHandler: editBackups }, wrap(async (req) => {
+    const r = await mc.maps.archive(req.srv, req.body?.name, req.body?.confirm);
+    mapsAudit(req, "world_archive", `${req.body?.name} -> ${r.movedTo}`);
+    return r;
+  }));
+  app.post("/api/servers/:id/mc/worlds/set-main", { preHandler: editBackups }, wrap(async (req) => {
+    const r = await mc.maps.setMain(req.srv, req.body?.name, req.body?.confirm);
+    mapsAudit(req, "world_set_main", `${r.previous} -> ${r.main}`);
+    return r;
+  }));
+  app.post("/api/servers/:id/mc/worlds/activate", { preHandler: editBackups }, wrap(async (req) => {
+    const r = await mc.maps.activate(req.srv, req.body?.name, req.body?.env);
+    mapsAudit(req, "world_activate", r.sent);
+    return r;
+  }));
+  app.get("/api/servers/:id/mc/lobby", { preHandler: asBackups }, wrap(async (req) => mc.maps.lobbyPlan(req.srv, String(req.query?.name ?? ""))));
+  app.post("/api/servers/:id/mc/lobby/run", { preHandler: editBackups }, wrap(async (req) => {
+    const r = await mc.maps.lobbyRun(req.srv, req.body?.commands);
+    mapsAudit(req, "lobby_run", `${r.results.length} commands, ${r.results.filter((x) => !x.ok).length} problems`);
+    return r;
+  }));
+
   // ---- GitHub sync (admin) ----
   app.get("/api/servers/:id/mc/github", { preHandler: asAdmin }, wrap(async (req) => mc.gh.get(req.srv)));
   app.put("/api/servers/:id/mc/github", { preHandler: editOwner }, wrap(async (req) => {

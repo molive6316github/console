@@ -96,6 +96,8 @@ export function buildApp({
     if (!body) return done(null, undefined);
     try { done(null, JSON.parse(body)); } catch { const e = new Error("Invalid JSON"); e.statusCode = 400; done(e); }
   });
+  // World uploads arrive as a raw zip stream (never buffered in memory).
+  app.addContentTypeParser("application/octet-stream", (_req, payload, done) => done(null, payload));
   app.decorate("services", services);
 
   // Errors with a status (bad input, conflicts, not found) become clean JSON. Anything else is a 500 that doesn't leak details.
@@ -158,7 +160,8 @@ export function buildApp({
 
   // POST requests must be JSON: blocks plain cross-site form posts. Cookie is SameSite=Strict too.
   app.addHook("preHandler", async (req, reply) => {
-    if ((req.method === "POST" || req.method === "PUT") && !String(req.headers["content-type"] ?? "").startsWith("application/json")) {
+    const rawUpload = req.headers["x-console-upload"] === "1" && String(req.headers["content-type"] ?? "").startsWith("application/octet-stream");
+    if ((req.method === "POST" || req.method === "PUT") && !rawUpload && !String(req.headers["content-type"] ?? "").startsWith("application/json")) {
       return reply.code(415).send({ error: "Content-Type must be application/json" });
     }
   });

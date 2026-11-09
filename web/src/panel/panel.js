@@ -11,6 +11,7 @@ import { overviewPage, startupPage, versionPage, peoplePage, joinPage } from "./
 import { websitePage } from "./website.js";
 import { goLivePage } from "./golive.js";
 import { consolePluginsPage } from "./cplugins.js";
+import { mapsPage } from "./maps.js";
 import { autofixPage } from "./autofix.js";
 import { assistantPage } from "./assistant.js";
 import { watchJoinFailures } from "./connfail.js";
@@ -49,6 +50,7 @@ export function startPanel(app, me, { signOut }) {
       { id: "plugins", icon: "✚", label: kind, show: has("plugins"), render: pluginsTab },
       { id: "files", icon: "▤", label: "Files", show: has("files") && server?.canEditFiles, render: filesTab },
       { id: "backups", icon: "⛁", label: "Backups & worlds", show: has("backups"), render: worldsTab },
+      { id: "maps", icon: "🗺", label: "Worlds & maps", show: has("backups"), render: mapsPage },
       { sep: "Manage", show: has("settings") || has("startup") || has("versions") },
       { id: "settings", icon: "⚙", label: "Game settings", show: has("settings"), render: gameTab },
       { id: "startup", icon: "⚡", label: "Startup & memory", show: has("startup"), render: startupPage },

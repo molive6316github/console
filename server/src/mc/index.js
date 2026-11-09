@@ -7,6 +7,7 @@ import { buildCommand, parseList } from "./players.js";
 import { createPlugins } from "./plugins.js";
 import { pauseSaves } from "./savehooks.js";
 import { restoreBackup, resetWorld } from "./worlds.js";
+import * as M from "./maps.js";
 import { pushConfig, pushWorld, repoOf } from "./github.js";
 import { ping } from "./slp.js";
 import { createVersions } from "./versions.js";
@@ -17,6 +18,8 @@ import { BACKUP_NAME } from "../backups.js";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // The folder, if (and only if) it is a Minecraft server: it has a server.properties.
+const WORLD_OK = M.WORLD_NAME;
+
 export function mcRoot(server) {
   const root = filesRootOf(server);
   if (!root) return null;
@@ -41,7 +44,7 @@ async function readJson(file) {
   }
 }
 
-export function createMc({ saveMeta = () => {}, saveTarget = () => {}, validateTarget = (_t, x) => x, run = async () => ({ code: 1, stdout: "", stderr: "" }), versionDeps = {}, runtime, listWaitMs = 900, fetchImpl = fetch, getToken, getMeta, jobs, getJoin = () => ({}), pingImpl = ping, cfgGet = () => null, cfgSet = () => {}, dataDir = "/tmp/console-mc", saveWaitMs = 30_000, afterBackup = null }) {
+export function createMc({ saveMeta = () => {}, saveTarget = () => {}, validateTarget = (_t, x) => x, run = async () => ({ code: 1, stdout: "", stderr: "" }), versionDeps = {}, runtime, listWaitMs = 900, fetchImpl = fetch, getToken, getMeta, jobs, getJoin = () => ({}), pingImpl = ping, cfgGet = () => null, cfgSet = () => {}, dataDir = "/tmp/console-mc", saveWaitMs = 30_000, afterBackup = null, worldGet = M.httpGet }) {
   const plugins = createPlugins({ fetchImpl, getToken, getMeta });
   const rootKind = (server) => {
     const root = mcRoot(server);
@@ -163,6 +166,96 @@ export function createMc({ saveMeta = () => {}, saveTarget = () => {}, validateT
     }
   }
 
+
+  // ---- worlds & maps: upload, download, import from a link, switch, lobby ----
+  const rootOrThrow = (server) => {
+    const root = mcRoot(server);
+    if (!root) throw new McError("This isn't a Minecraft server", 404);
+    return root;
+  };
+  const tmpFor = (server) => path.join(dataDir, "mc-tmp", server.id);
+  const maps = {
+    list: async (server) => {
+      const root = rootOrThrow(server);
+      return { ...(await M.listWorlds(root)), multiverse: M.multiverseInfo(root), running: (await runtime.status(server).catch(() => "unknown")) === "up" };
+    },
+    upload: async (server, stream, name) => {
+      const root = rootOrThrow(server);
+      const file = await M.saveUpload({ stream, tmpDir: tmpFor(server) });
+      try { return await M.importZip({ root, file, name }); } finally { await fs.rm(file, { force: true }); }
+    },
+    importUrl: (server, url, name, actor) => {
+      const root = rootOrThrow(server);
+      if (!WORLD_OK.test(String(name ?? ""))) throw new McError("Pick a name for the world (letters, numbers, dot, dash, underscore)");
+      return jobs.start({ title: `Import world ${name} on ${server.name}`, actor }, async (ctx) => {
+        ctx.log?.(`Downloading ${url}`);
+        const r = await M.importFromUrl({ root, url, name, tmpDir: tmpFor(server), get: worldGet });
+        ctx.log?.(`Imported ${r.name} (${(r.size / 1048576).toFixed(1)} MB)`);
+      });
+    },
+    download: async (server, name) => {
+      const root = rootOrThrow(server);
+      const resume = await pauser(server, root)(); // flush the world to disk first so the zip isn't torn
+      const out = await M.exportZip({ root, name }).catch(async (e) => { await resume?.(); throw e; });
+      // Saving can turn back on as soon as the zip has read its files.
+      out.stream.on("close", () => resume?.().catch(() => {}));
+      out.stream.on("error", () => resume?.().catch(() => {}));
+      return out;
+    },
+    archive: async (server, name, confirm) => {
+      const root = rootOrThrow(server);
+      needConfirm(server, confirm);
+      await mustBeStopped(server);
+      runtime.busy.add(server.id);
+      try { return await M.archiveWorld({ root, name }); } finally { runtime.busy.delete(server.id); }
+    },
+    setMain: async (server, name, confirm) => {
+      const root = rootOrThrow(server);
+      needConfirm(server, confirm);
+      await mustBeStopped(server);
+      runtime.busy.add(server.id);
+      try { return await M.setMainWorld({ root, name }); } finally { runtime.busy.delete(server.id); }
+    },
+    // Tell a running server (with Multiverse) to load the world now, without a restart.
+    activate: async (server, name, env) => {
+      const root = rootOrThrow(server);
+      const w = (await M.listWorlds(root)).worlds.find((x) => x.name === name);
+      if (!w) throw new McError("No such world", 404);
+      if (!M.multiverseInfo(root).installed) throw new McError("Install Multiverse first. It's what lets one server run several worlds", 409);
+      if ((await runtime.status(server).catch(() => "unknown")) !== "up") throw new McError("The server isn't running. The world will load next time it starts", 409);
+      const driver = getDriver(server.type);
+      const cmd = `mv import ${name} ${M.envOf(name, env)}`;
+      await driver.send(server.target, cmd, { id: server.id });
+      return { sent: cmd };
+    },
+    lobbyPlan: async (server, name) => {
+      const root = rootOrThrow(server);
+      const list = await M.listWorlds(root);
+      const n = name || "lobby";
+      return { steps: M.lobbyPlan({ name: n, exists: list.worlds.some((w) => w.name === n), mv: M.multiverseInfo(root) }), multiverse: M.multiverseInfo(root) };
+    },
+    // Sends each command in turn and reports what the console said back, so a wrong command shows up as an error line, not silence.
+    lobbyRun: async (server, commands) => {
+      const root = rootOrThrow(server);
+      if (!M.multiverseInfo(root).installed) throw new McError("Install Multiverse first", 409);
+      if ((await runtime.status(server).catch(() => "unknown")) !== "up") throw new McError("Start the server first. These commands run in the live game", 409);
+      if (!Array.isArray(commands) || !commands.length || commands.length > 30) throw new McError("Nothing to run");
+      const driver = getDriver(server.type);
+      const results = [];
+      for (const raw of commands) {
+        const cmd = String(raw ?? "").trim();
+        if (!M.SAFE_COMMAND.test(cmd)) { results.push({ cmd, ok: false, output: "Refused: not a Multiverse/world command Console will run for you" }); continue; }
+        const before = await driver.logs(server.target, 60).catch(() => "");
+        await driver.send(server.target, cmd, { id: server.id });
+        await sleep(Math.max(listWaitMs, 1200));
+        const lines = M.newLines(before, await driver.logs(server.target, 60).catch(() => "")).filter((l) => !/Server thread\/INFO\]: .*issued server command/.test(l));
+        const output = lines.join("\n").slice(-600);
+        results.push({ cmd, ok: !/Unknown (or incomplete )?command|Usage:|Error|Exception|not found|doesn't exist|No world/i.test(output), output });
+      }
+      return { results };
+    },
+  };
+
   async function portOf(server) {
     const root = mcRoot(server);
     if (!root) return 25565;
@@ -256,7 +349,7 @@ export function createMc({ saveMeta = () => {}, saveTarget = () => {}, validateT
   }
 
   return {
-    getProps, setProps, players, act, liveStatus, joinInfo, safeBackup, switchVersion, portOf, readTps, runtimeStatus: (x) => runtime.status(x).catch(() => "unknown"), restore, reset, gh, scheduled,
+    getProps, setProps, players, act, liveStatus, joinInfo, safeBackup, switchVersion, portOf, readTps, runtimeStatus: (x) => runtime.status(x).catch(() => "unknown"), restore, reset, gh, scheduled, maps,
     plugins: {
       kind: (server) => rootKind(server).kind,
       list: async (server) => { const { root, kind } = rootKind(server); return { kind, files: await plugins.list(root, kind) }; },

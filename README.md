@@ -217,6 +217,16 @@ The GitHub token needs write access to *Contents* on the backup repo. Open TCP 2
 - **Go live checklist**: checks the server (EULA, whitelist, ops, rollback plugin, backups, off-box copy, crash restart, daily restart, memory, alerts) and fixes most of it in one click. **Off-box backups** copy each world backup to any S3-compatible storage (Oracle, Backblaze B2, Cloudflare R2, AWS).
 - **Claude Code** (Panel settings, off by default): installs Claude Code into `~/.console-tools` (no sudo) and opens it in the web terminal so you can sign in with your own account. It needs the web terminal enabled. Claude Code can run commands as Console's user, so it is admin-only, disabled by safe mode, and audited.
 
+## Worlds & maps (Minecraft mode)
+
+**Worlds & maps** in the sidebar:
+
+- **Upload a map**: pick a `.zip` (a wrapper folder inside is fine; it just needs `level.dat`). It streams to the server, is checked (no `..` paths, no symlinks, size-capped, must contain a world), and appears as a new world. `uid.dat` is dropped so Multiverse gives the copy its own id.
+- **Download a world**: a zip of the world plus its nether/end. On a running server saving pauses for a moment so the zip isn't torn.
+- **Import from a link**: Console downloads the zip itself. Only public addresses are allowed (private networks, localhost and cloud metadata addresses are refused, including after redirects).
+- **Several worlds on one server**: installs Multiverse; **Load now** runs `mv import` on a live server. **Make main** edits `level-name` (needs the server stopped). **Remove** moves a world into `old-worlds/`, never deletes it. The main world can't be removed.
+- **Lobby builder**: shows a plan of Multiverse commands matched to the installed version (peaceful, no PvP, no monsters, adventure mode, always day), lets you edit/untick, runs them in the live game and shows what the console answered. Failures get a *Fix with AI* button. Only `mv`/world commands are accepted.
+
 ## Console plugins (add-ons for Console itself)
 
 Panel → **Console plugins**. They run inside Console, so only switch on ones you trust. Built in, all off until you enable them:

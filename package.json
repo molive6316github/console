@@ -1,6 +1,6 @@
 {
   "name": "mxt-console",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "type": "module",
   "description": "Web dashboard for starting, stopping and watching all kinds of servers. One-click Minecraft, Docker and Node setups, backups, schedules.",
   "engines": {
@@ -19,7 +19,9 @@
     "@fastify/static": "^8.0.0",
     "@fastify/websocket": "^11.3.7",
     "@lydell/node-pty": "^1.2.0-beta.18",
-    "fastify": "^5.0.0"
+    "fastify": "^5.0.0",
+    "yauzl": "^3.4.0",
+    "yazl": "^3.3.1"
   },
   "devDependencies": {
     "@xterm/addon-fit": "^0.11.0",
