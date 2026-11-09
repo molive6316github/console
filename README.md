@@ -229,6 +229,12 @@ Panel → **Console plugins**. They run inside Console, so only switch on ones y
 
 Missing something? Type what you want in **Build a plugin with Claude**; it writes a draft, you read it, then install. Writing one by hand: see [PLUGINS.md](PLUGINS.md).
 
+## Auto-fix (AI repair, any agent)
+
+Panel → **Auto-fix**. When a server keeps crashing, a plugin breaks, or Console itself errors, an agent reads what Console found, edits the files, restarts, and checks it worked. Each run snapshots first and **puts everything back if the check fails**; every fix is listed with the files it changed and can be undone. Off by default. It never touches worlds or player data and gets no shell.
+
+The agent is swappable: **Claude Code**, **OpenAI Codex**, or any command (it runs in the folder being fixed with the task in `$CONSOLE_TASK` / `$CONSOLE_TASK_FILE`). The **Diagnose** card has a one-click "Fix it with AI" too.
+
 ## Web terminal and Linux users (advanced, off by default)
 
 Both are switched on by an admin under **Settings → Advanced tools**, are admin-only, are blocked by safe mode, and are written to the audit log.
