@@ -257,3 +257,18 @@ test("live status for signed-in people with console access; offline when the pro
     assert.equal((await helper.get("/api/servers/mc/mc/status")).json().online, false);
   } finally { srv.close(); }
 });
+
+test("people: owner adds someone directly; the password is generated once and the role's permissions apply", async () => {
+  const f = await setup();
+  const boss = await as(f);
+  assert.equal((await boss.post("/api/people", { serverId: "mc", username: "jake", preset: "nope" })).statusCode, 400);
+  const r = await boss.post("/api/people", { serverId: "mc", username: "jake", preset: "helper" });
+  assert.equal(r.statusCode, 200);
+  const { password } = r.json();
+  assert.ok(password && password.length >= 10);
+  const jake = await as(f, "jake", password);
+  assert.equal(jake.status, 200);
+  assert.equal((await jake.get("/api/servers/other/mc/players")).statusCode, 404, "only sees the server they were added to");
+  assert.equal((await boss.post("/api/people", { serverId: "mc", username: "jake", preset: "helper" })).statusCode, 409);
+  assert.equal((await jake.post("/api/people", { serverId: "mc", username: "x1", preset: "helper" })).statusCode, 403, "helpers can't add people");
+});

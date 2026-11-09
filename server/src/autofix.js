@@ -20,11 +20,15 @@ export const AGENTS = {
     label: "Claude Code",
     bins: () => [path.join(toolsBin(), "claude"), "claude"],
     argv: (bin, task) => [bin, "-p", task, "--allowedTools", "Read", "Write", "Edit", "Glob", "Grep", "--permission-mode", "acceptEdits", "--max-turns", "40"],
+    // The assistant gets no file or shell access at all: only the console-ctl tool, which is bound to the asker's permissions.
+    assist: (bin, task) => [bin, "-p", task, "--allowedTools", "Bash(console-ctl:*)", "--max-turns", "30"],
+    restricted: true,
   },
   codex: {
     label: "OpenAI Codex",
     bins: () => [path.join(toolsBin(), "codex"), "codex"],
     argv: (bin, task) => [bin, "exec", "--full-auto", "--skip-git-repo-check", task],
+    assist: (bin, task) => [bin, "exec", "--full-auto", "--skip-git-repo-check", task],
   },
 };
 

@@ -259,6 +259,23 @@ export async function peoplePage(box, { server, me, life }) {
     }
   };
 
+  // --- add someone directly (no link)
+  const addName = h("input", { placeholder: "Username", autocomplete: "off", spellcheck: "false" });
+  const addPass = h("input", { placeholder: "Password (blank = make one for them)", autocomplete: "new-password" });
+  const addPreset = h("select", {}, ...Object.entries(presets).map(([id, p]) => h("option", { value: id }, `${p.label}: ${p.help}`)));
+  const addShown = h("div", {});
+  const addPerson = async () => {
+    try {
+      const r = await api("/people", { method: "POST", body: { serverId: server.id, username: addName.value.trim(), password: addPass.value, preset: addPreset.value } });
+      addShown.replaceChildren(h("div", { class: "panel good" }, h("strong", {}, `${r.username} is added.`),
+        r.password ? h("div", { class: "row tight" }, h("span", {}, "Their password: "), h("code", { class: "link" }, r.password), h("button", { onclick: () => copyText(r.password) }, "Copy")) : null,
+        h("small", { class: "muted" }, "Send it privately. It isn't shown again, and they can change it under Account.")));
+      addName.value = ""; addPass.value = "";
+      loadPeople();
+    } catch (e) { toast(e.message, true); }
+  };
+  const addBox = h("div", { class: "stack" }, h("h3", {}, "Add someone now"), h("p", { class: "muted small" }, "No link needed: you pick their name and role and Console makes the account."), addName, addPass, addPreset, h("div", { class: "row" }, h("button", { class: "primary", onclick: addPerson }, "Add person")), addShown);
+
   async function loadInvites() {
     const rows = await api(`/invites?server=${encodeURIComponent(server.id)}`).catch(() => []);
     const open = rows.filter((r) => r.state === "open");
@@ -302,7 +319,7 @@ export async function peoplePage(box, { server, me, life }) {
 
   box.append(
     h("div", { class: "panel" }, h("h2", {}, "People with access"), list),
-    h("div", { class: "panel" }, h("h2", {}, "Invite someone"), h("div", { class: "stack wide" }, preset, grid.el, note, days, h("div", { class: "row" }, h("button", { class: "primary", onclick: invite }, "Create invite link"))), shown, invitesBox)
+    h("div", { class: "panel" }, h("h2", {}, "Invite someone"), h("div", { class: "stack wide" }, preset, grid.el, note, days, h("div", { class: "row" }, h("button", { class: "primary", onclick: invite }, "Create invite link"))), shown, invitesBox, addBox)
   );
   loadPeople().catch((e) => list.append(h("div", { class: "error" }, e.message)));
   loadInvites();

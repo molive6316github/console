@@ -46,6 +46,12 @@ export function userFromToken(db, token) {
   return { id: row.id, username: row.username, role: row.role, allServers: row.all_servers === 1, perms: parsePerms(row.perms, row.role) };
 }
 
+// Same shape as userFromToken, looked up by id (used for short-lived assistant tokens, so permission changes apply immediately).
+export function userById(db, id) {
+  const row = db.prepare("SELECT id, username, role, all_servers, perms FROM users WHERE id = ?").get(id);
+  return row ? { id: row.id, username: row.username, role: row.role, allServers: row.all_servers === 1, perms: parsePerms(row.perms, row.role) } : null;
+}
+
 // Sets a new password and signs out every session of that user except keepToken (the one making the change).
 export function changePassword(db, userId, newPassword, keepToken) {
   db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(hashPassword(newPassword), userId);

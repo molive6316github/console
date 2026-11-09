@@ -229,6 +229,14 @@ Panel → **Console plugins**. They run inside Console, so only switch on ones y
 
 Missing something? Type what you want in **Build a plugin with Claude**; it writes a draft, you read it, then install. Writing one by hand: see [PLUGINS.md](PLUGINS.md).
 
+## Assistant (one agent that helps, whatever your role)
+
+Panel → **Assistant**. A chat where you say what you want ("why was it laggy?", "whitelist Steve and restart") and the agent does it through Console's own API. It runs **as the person asking**, so a helper only gets what a helper can do, and it can never manage people, sign-ins or the terminal. Stop, restart, delete and restore **wait for your click** in the chat.
+
+Owners pick the agent in the Assistant settings: **Claude Code** (sandboxed: its only tool is `console-ctl`), **Codex**, or any command. Agents that can't be sandboxed are owner-only.
+
+**People:** Panel → People & invites has an invite link (they pick their own password) and an "Add someone now" form (you pick the name and role; a password is generated if you leave it blank).
+
 ## Auto-fix (AI repair, any agent)
 
 Panel → **Auto-fix**. When a server keeps crashing, a plugin breaks, or Console itself errors, an agent reads what Console found, edits the files, restarts, and checks it worked. Each run snapshots first and **puts everything back if the check fails**; every fix is listed with the files it changed and can be undone. Off by default. It never touches worlds or player data and gets no shell.

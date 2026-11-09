@@ -1,6 +1,7 @@
 import { createInvites } from "../invites.js";
-import { UserError } from "../users.js";
-import { PERMS, PRESETS } from "../perms.js";
+import { UserError, createUser } from "../users.js";
+import { randomBytes } from "node:crypto";
+import { PERMS, PRESETS, validatePerms } from "../perms.js";
 import { audit } from "../db.js";
 import { loginThrottled, recordLoginFailure, clearLoginFailures, createSession } from "../auth.js";
 import { serverFor } from "../access.js";
@@ -34,6 +35,20 @@ export function inviteRoutes(app, { db, need, safeMode, cookie }) {
     const r = invites.create({ serverId: s.id, preset: req.body?.preset, perms: req.body?.perms, note: req.body?.note, days: req.body?.days, actor: req.user.username });
     audit(db, { username: req.user.username, serverId: s.id, action: "invite_create", ok: true, detail: `${req.body?.preset ?? "custom"}${req.body?.note ? ` (${String(req.body.note).slice(0, 40)})` : ""}` });
     return { id: r.id, token: r.token, expiresAt: r.expiresAt }; // the only time the link is ever shown
+  }));
+  // Plain "add someone": make the account now. Leave the password blank and one is generated (shown once).
+  app.post("/api/people", { preHandler: [need("admin"), noSafe] }, wrap(async (req, reply) => {
+    const s = scoped(req, reply); if (reply.sent) return;
+    const b = req.body ?? {};
+    let list;
+    if (b.preset) { if (!PRESETS[b.preset]) throw new UserError("Unknown role"); list = PRESETS[b.preset].perms; }
+    else { list = validatePerms(b.perms); if (!list?.length) throw new UserError("Pick a role or at least one permission"); }
+    const generated = !b.password;
+    const password = b.password || randomBytes(9).toString("base64url");
+    const id = createUser(db, { username: b.username, password, role: "viewer", allServers: false, servers: [s.id] });
+    db.prepare("UPDATE users SET perms = ? WHERE id = ?").run(JSON.stringify(list), id);
+    audit(db, { username: req.user.username, serverId: s.id, action: "person_add", ok: true, detail: `${b.username} (${b.preset ?? "custom"})` });
+    return { username: b.username, password: generated ? password : undefined };
   }));
   app.delete("/api/invites/:id", { preHandler: need("admin") }, wrap(async (req, reply) => {
     if (!invites.revoke(Number(req.params.id))) return reply.code(404).send({ error: "No such open invite" });

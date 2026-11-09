@@ -28,6 +28,9 @@ import { nsRoutes } from "./routes/ns.js";
 import { createPluginHost, pluginRoutes } from "./cplugins.js";
 import { createAutoFix } from "./autofix.js";
 import { createScopes } from "./autofix-scopes.js";
+import { createAssistant } from "./assistant.js";
+import { assistantRoutes } from "./routes/assistant.js";
+import { userById } from "./auth.js";
 import { createConnWatcher } from "./mc/connfail.js";
 import { autofixRoutes } from "./routes/autofix.js";
 import { createPluginBuilder } from "./pluginbuilder.js";
@@ -71,6 +74,7 @@ export function buildApp({
   nsOptions = null,
   pluginOptions = null,
   autofixOptions = null,
+  assistantOptions = null,
   claudeOptions = null,
   logRing = createLogRing(),
   autoUpdateEveryMs = 0, // index.js turns this on; tests leave it off
@@ -83,6 +87,8 @@ export function buildApp({
   const bootId = randomUUID(); // changes every start; the UI uses it to know the restart finished
   const app = Fastify({ logger, trustProxy: Boolean(process.env.CONSOLE_TRUST_PROXY) });
   app.register(cookie);
+  const routeList = [];
+  app.addHook("onRoute", (r) => { for (const m of [r.method].flat()) if (m !== "HEAD" && m !== "OPTIONS") routeList.push({ method: m, url: r.url }); });
   // Keep the raw JSON text too: some plugins (Discord) must verify a signature over the exact bytes.
   app.removeContentTypeParser("application/json");
   app.addContentTypeParser("application/json", { parseAs: "string", bodyLimit: 1_048_576 }, (req, body, done) => {
@@ -134,6 +140,20 @@ export function buildApp({
   app.decorateRequest("user", null);
   app.addHook("onRequest", async (req) => {
     req.user = userFromToken(db, req.cookies?.[COOKIE]);
+  });
+  // The assistant calls the API with a short-lived token tied to the person who asked; it gets exactly their permissions.
+  app.decorateRequest("viaAgent", false);
+  let assistantRef = null;
+  app.addHook("onRequest", async (req) => {
+    const t = req.headers["x-console-agent"];
+    if (!t) return;
+    req.user = assistantRef?.userForToken(t) ?? null;
+    req.viaAgent = Boolean(req.user);
+  });
+  app.addHook("preHandler", async (req, reply) => {
+    if (!req.viaAgent) return;
+    const stop = assistantRef.guard(req, req.user);
+    if (stop) return reply.code(stop.code).send(stop.body);
   });
 
   // POST requests must be JSON: blocks plain cross-site form posts. Cookie is SameSite=Strict too.
@@ -331,6 +351,11 @@ export function buildApp({
   // Auto-fix: a swappable agent repairs Minecraft, Console, plugins and Link; every run is snapshotted, verified and reverted if it doesn't work.
   const autofixScopes = createScopes({ db, mc: services.mc, runtime: services.runtime, diagnose: services.diagnose, pluginHost, repoRoot: path.resolve(here, "../.."), run: runCmd, restartConsole: async () => { setTimeout(() => process.exit(75), 1500); }, ...(autofixOptions?.scopes ?? {}) });
   const autofix = createAutoFix({ db, dataDir, jobs: services.jobs, run: runCmd, scopes: autofixScopes, ...(autofixOptions?.engine ?? {}) });
+  const assistant = createAssistant({ db, dataDir, run: runCmd, repoRoot: path.resolve(here, "../.."), baseUrl: () => { const a = app.server.address(); return a && a.port ? `http://127.0.0.1:${a.port}` : `http://127.0.0.1:${process.env.PORT ?? 3000}`; }, ...(assistantOptions ?? {}) });
+  assistantRef = assistant;
+  assistantRoutes(app, { ...ctx, assistant, safeMode });
+  app.decorate("assistant", assistant);
+  app.addHook("onReady", async () => { assistant.setRoutes(routeList); });
   const connWatcher = createConnWatcher({ db, ...(autofixOptions?.connWatcher ?? {}) });
   autofixRoutes(app, { ...ctx, autofix, connWatcher, safeMode });
   app.decorate("connWatcher", connWatcher);
